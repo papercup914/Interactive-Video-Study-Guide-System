@@ -59,20 +59,16 @@ def extract_text_from_pdf(file_path: str):
     genai.configure(api_key=api_key)
     
     try:
-        print(f"Uploading {file_path} to Gemini...")
-        uploaded_file = genai.upload_file(path=file_path, display_name=os.path.basename(file_path))
+        print(f"Reading {file_path} for inline binary extraction...")
+        with open(file_path, "rb") as f:
+            pdf_data = f.read()
+            
+        doc_data = {
+            "mime_type": "application/pdf",
+            "data": pdf_data
+        }
         
-        # Poll until ACTIVE
-        print(f"File uploaded. Polling state (current: {uploaded_file.state.name})...")
-        while uploaded_file.state.name == "PROCESSING":
-            time.sleep(2)
-            uploaded_file = genai.get_file(uploaded_file.name)
-            print(f"Polling state: {uploaded_file.state.name}")
-            
-        if uploaded_file.state.name == "FAILED":
-            raise Exception("Gemini PDF 업로드 실패 (FAILED 상태).")
-            
-        print("File is ACTIVE. Extracting text...")
+        print("Extracting text directly using Gemini...")
         
         model = genai.GenerativeModel("gemini-3.5-flash")
         
@@ -81,13 +77,7 @@ def extract_text_from_pdf(file_path: str):
             "모든 정보를 마크다운 형식으로 상세히 추출해주세요. 이미지가 있다면 이미지에서 유추할 수 있는 내용도 글로 묘사해주세요."
         )
         
-        response = model.generate_content([uploaded_file, prompt])
-        
-        # Optional: delete file after extraction to save quota
-        try:
-            genai.delete_file(uploaded_file.name)
-        except Exception:
-            pass
+        response = model.generate_content([doc_data, prompt])
             
         return response.text
         
