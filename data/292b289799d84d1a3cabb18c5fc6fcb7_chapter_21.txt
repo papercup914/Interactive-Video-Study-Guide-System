@@ -1,0 +1,193 @@
+# 📚 챕터 3: 검증 전용 에이전트 설계 — 생성하지 않고 검사만 수행
+
+> **이전 챕터 복습**: 지난 시간에는 **'블로그 플래너(Blog Planner)'**라는 **생성자(Generator) 에이전트**를 만들었습니다. 주제만 던져주면 척척 마크다운 목차를 **생성해 내는** 친구였죠. 그런데 이 친구, 실수를 할 수도 있습니다. 목차 형식이 맞는지, 섹션 개수가 4~6개인지, 불릿 포인트가 제대로 들어갔는지 **누가 검사해 주나요?** 바로 지금 만들 **'검증 전용 에이전트(Validator Agent)'**가 그 역할을 합니다.
+
+---
+
+## 1. 왜 '따로' 검사하는 에이전트가 필요할까? — 요리사와 검식관의 분리
+
+여러분이 **고급 레스토랑 주방**을 운영한다고 상상해 보세요.
+
+*   **생성자 에이전트 (블로그 플래너) = 헤드 셰프 (요리사)**  
+    창의력 넘치게 새로운 메뉴(콘텐츠)를 뚝딱 만들어냅니다. 하지만 바쁜 와중에 간을 너무 세게 쳤는지, 플레이팅이 삐뚤어졌는지 **자신이 만든 음식을 스스로 냉정하게 검사하기는 어렵습니다.**
+*   **검증 전용 에이전트 (Validator) = 검식관 (QA 매니저 / 위생 검사관)**  
+    요리는 **일절 하지 않습니다**. 오직 완성된 접시를 받아 **체크리스트(규격서)**를 들고 "간 맞음?", "온도 적정?", "이물질 없음?"만 확인하고 **합격/불합격 도장**만 찍습니다.
+
+> **💡 개념 돋보기: 단일 책임 원칙 (Single Responsibility Principle) in Agent Design**
+> > **한 에이전트에게 '생성'과 '검증'을 동시에 맡기면 프롬프트가 꼬이고 성능이 떨어집니다.**  
+> > - 생성 프롬프트: "창의적으로, 풍성하게, 자유롭게 써!"  
+> > - 검증 프롬프트: "규칙에 어긋나면 가차 없이 거부해!"  
+> > 이 상충되는 지시를 한 프롬프트에 욱여넣으면 모델은 혼란스러워합니다. **역할을 분리해 별도의 에이전트로 두는 것**이 정석입니다.
+
+---
+
+## 2. 검증 전용 에이전트, 무엇을 어떻게 검사하나? — 체크리스트(Contract) 정의하기
+
+이 에이전트는 **코드를 짜거나 글을 쓰지 않습니다**. 입력으로 받은 **이전 에이전트의 출력물(후보 결과물)**을 받아 **미리 정의된 규칙(Contract/Schema)**과 대조만 합니다.
+
+### 🎯 블로그 플래너 출력을 검증할 체크리스트 예시
+
+| 검증 항목 (Rule) | 설명 | 실패 시 조치 |
+| :--- | :--- | :--- |
+| **포맷 준수** | 마크다운(`#`, `##`, `- `) 문법 준수 여부 | ❌ 거부 → 플래너에게 재시도 요청 |
+| **필수 구조 존재** | 제목(Title), 서론(Introduction), 섹션(Sections) 필수 포함 | ❌ 거부 |
+| **섹션 개수 제한** | 섹션이 **4개 이상 6개 이하**인지 카운트 | ❌ 거부 ("3개야, 7개야 -> 다시 써") |
+| **불릿 포인트 포함** | 각 섹션 하위에 최소 1개 이상의 `- ` 불릿 존재 | ❌ 거부 |
+| **금지어/정책 위반** | 민감 정보, 욕설, 경쟁사 비방 등 포함 여부 | ❌ 즉시 차단 |
+
+> **💡 개념 돋보기: 출력 스키마(Output Schema) = 검증의 기준선**
+> > 검증 에이전트에게 "잘 썼는지 봐줘"라고 말하면 안 됩니다. **JSON Schema나 Pydantic 모델** 같은 **구조화된 규칙**을 줘야 기계적으로 판단할 수 있습니다.  
+> > ```python
+> > # 예: Pydantic으로 정의한 '합격 기준'
+> > class BlogOutline(BaseModel):
+> >     title: str
+> >     intro: str
+> >     sections: List[Section] # min_items=4, max_items=6
+> > ```
+> > 이 스키마가 곧 **검식관이 들고 있는 체크리스트**입니다.
+
+---
+
+## 3. ADK에서 검증 에이전트 구현하기 — `output_schema`와 `disallow_transfer` 활용
+
+지난 챕터에서 `agent.py`에 `BlogPlanner`를 만들었죠? 이제 उसी 파일에 **`BlogValidator`**를 추가합니다.
+
+### 🛠 코드 라인별 상세 해설 (가상 구현 시나리오)
+
+스크립트에는 설치와 플래너까지 나왔으니, **검증 에이전트 코드**가 어떻게 생겼을지 **설계도**를 그려보며 원리를 익혀봅시다.
+
+```python
+# agent.py (이어쓰기)
+
+from google.adk.agents import LlmAgent
+from google.adk.tools import FunctionTool
+from pydantic import BaseModel, Field, ValidationError
+from typing import List
+import json
+
+# 1️⃣ [체크리스트 정의] 검증의 기준이 될 데이터 구조 (Pydantic 모델)
+# 이 구조가 바로 "검식관의 눈"입니다.
+class Section(BaseModel):
+    heading: str
+    bullets: List[str] = Field(min_length=1, description="최소 1개 불릿 필수")
+
+class BlogOutline(BaseModel):
+    title: str
+    introduction: str
+    sections: List[Section] = Field(min_length=4, max_length=6) # 4~6개 강제
+
+# 2️⃣ [검증 로직 함수] LLM이 아닌 '파이썬 코드'로 기계적 검증 수행
+# LLM에게 "검사해줘"라고 시키면 비용도 들고 틀릴 수도 있어요.
+# 정해진 규칙(스키마)은 코드로 검사하는 게 빠르고 정확합니다.
+def validate_outline(outline_text: str) -> dict:
+    """
+    플래너가 만든 마크다운 텍스트를 파싱해서 Pydantic 모델에 태워봅니다.
+    통과하면 {'valid': True, 'data': ...}, 실패하면 {'valid': False, 'errors': ...}
+    """
+    try:
+        # 마크다운 파싱 로직 생략 (실제론 마크다운 파서 필요)
+        # 여기선 편의상 JSON 형태로 들어왔다 가정
+        parsed_data = json.loads(outline_text) 
+        
+        # Pydantic 검증 실행! 여기서 예외 터지면 무조건 불합격
+        validated = BlogOutline(**parsed_data)
+        return {"valid": True, "data": validated.model_dump()}
+    except (ValidationError, json.JSONDecodeError) as e:
+        return {"valid": False, "errors": str(e)}
+
+# 3️⃣ [검증 전용 에이전트 정의] - 도구(FunctionTool)만 달고 모델은 가볍게
+# 이 에이전트는 '생성'을 안 하므로 모델 용량 작은 거 써도 됨 (비용 절감)
+# instruction: "너는 검사관이야. 주어진 툴로 검증만 해. 절대 고치지 말고 결과만 보고해."
+blog_validator = LlmAgent(
+    name="BlogValidator",
+    model="gemini-1.5-flash", # 가벼운 모델로 충분
+    description="생성된 블로그 목차가 규칙에 맞는지 검증만 수행함",
+    instruction="""
+    당신은 엄격한 품질 검사관입니다.
+    사용자가 전달한 '후보 목차'를 validate_outline 도구로 검사하세요.
+    도구 결과 valid=true면 "PASS: 검증 통과"라 답하고,
+    valid=false면 "FAIL: [에러 내용] - 수정 필요"라고만 답하세요.
+    절대 목차를 수정하거나 다시 쓰지 마세요.
+    """,
+    tools=[FunctionTool(validate_outline)], # 검증 로직을 도구로 장착
+    # 디폴트로 output_key="validation_result" 등에 저장됨
+)
+```
+
+> **💡 개념 돋보기: 왜 LLM에게 검증 시키지 않고 `FunctionTool`(파이썬 함수)을 쓸까?**
+> > - **비용/속도**: LLM 호출비 $0 vs 파이썬 실행비 $0 (하지만 LLM은 토큰 비용, 지연 발생)
+> > - **결정론적(Deterministic)**: 같은 입력엔 **항상 같은 결과**. LLM은 "아 오늘 컨디션 좋네~" 하고 넘어갈 수 있음.
+> > - **분리 원칙**: 검증 로직은 **비즈니스 룰(코드)**로 관리하고, 에이전트는 **오케스트레이션(흐름 제어)**만 담당.
+
+---
+
+## 4. 루프 에이전트(Loop Agent)와 결합 — "통과할 때까지 다시 써!"
+
+스크립트 앞부분에서 **"Loop Agent가 검증 실패 시 자동 재시도 처리해 준다"**고 했죠? 이제 둘을 연결합니다.
+
+### 🔄 워크플로우 전체 그림 (Generate → Validate → Loop)
+
+```mermaid
+graph TD
+    A[사용자: 주제 입력] --> B(BlogPlanner: 목차 생성)
+    B --> C{BlogValidator: 검증}
+    C -- "PASS" --> D[최종 결과 출력]
+    C -- "FAIL (에러 상세)" --> E[Loop Agent: 재시도 지시]
+    E --> B
+```
+
+**ADK 코드로 엮기 (개념적 구조):**
+
+```python
+from google.adk.agents import LoopAgent, SequentialAgent
+
+# 1. 순차 실행: 플래너 -> 검증자
+generation_pipeline = SequentialAgent(
+    name="GenerateAndCheck",
+    sub_agents=[blog_planner, blog_validator] # 앞서 만든 두 에이전트
+)
+
+# 2. 루프 에이전트로 감싸기: 최대 3번까지 재시도
+# LoopAgent는 하위 에이전트(여기선 SequentialAgent)를 반복 실행하며,
+# 특정 조건(예: state['validation_result'].valid == True) 충족 시 탈출
+main_workflow = LoopAgent(
+    name="BlogCreationLoop",
+    sub_agents=[generation_pipeline],
+    max_iterations=3, # 무한 루프 방지 안전장치
+    # 종료 조건 커스텀 가능 (예: state 확인 로직)
+)
+```
+
+> **💡 개념 돋보기: 상태(State)를 이용한 루프 제어**
+> > `blog_validator`가 도구를 실행하면 결과가 **세션 상태(Session State)**에 저장됩니다 (예: `state['validation_result'] = {'valid': False, ...}`).
+> > `LoopAgent`는 매 반복마다 이 상태를 확인해 **"valid == True면 stop, 아니면 continue"**를 결정합니다.  
+> > 이때 **플래너에게 "이전 에러: 섹션 3개 부족함. 5개로 늘려서 다시 써"** 같은 피드백을 주려면, 플래너의 `instruction`에 `"state['validation_result'] 에러 내용을 참고해 수정하라"`는 식의 프롬프트 엔지니어링이 필요합니다.
+
+---
+
+## 5. 실전 팁: 검증 에이전트 설계 시 자주 하는 실수와 해결책
+
+| 실수 유형 | 증상 | 해결 전략 |
+| :--- | :--- | :--- |
+| **LLM에게 검증 맡기기** | "잘 쓴 것 같아요"라며 엉뚱한 걸 통과시킴 / 토큰 비용 폭증 | **규칙 기반(코드/스키마) 검증**을 `FunctionTool`로 분리 |
+| **에러 메시지가 너무 추상적** | 플래너가 "수정하래요"만 듣고 뭘 고쳐야 할지 모름 | **구조화된 에러 반환**: `{"field": "sections[2].bullets", "issue": "empty list"}` |
+| **무한 루프에 빠짐** | 계속 실패하는데 재시도만 반복 (비용 폭탄) | `LoopAgent.max_iterations` 필수 설정 + **사람 개입(Human-in-the-loop) 알림** 연동 |
+| **검증 기준이 모호함** | "퀄리티가 좋아야 함" 같은 주관적 기준만 있음 | **정량적 지표로 변환**: 길이, 키워드 포함 여부, 형식, 개수 등 |
+
+---
+
+## 6. 요약 및 다음 챕터 예고
+
+이번 챕터에서 우리는 **"생성은 플래너에게, 검증은 밸리데이터에게"**라는 **역할 분리 설계**의 핵심 원리를 배웠습니다.
+
+1.  **비유**: 요리사(생성) vs 검식관(검증) — 서로 다른 마인드셋과 도구 필요.
+2.  **구현**: Pydantic `BaseModel`로 **체크리스트(스키마)** 정의 → 파이썬 함수로 **기계적 검증** → `FunctionTool`로 에이전트에 장착.
+3.  **오케스트레이션**: `SequentialAgent`로 직렬 연결 → `LoopAgent`로 **자동 재시도 루프** 구성.
+4.  **핵심 이점**: 결정론적 검증으로 **신뢰도↑, 비용↓, 디버깅 용이**.
+
+---
+
+## 🧭 다음 챕터 예고: **"상태 관리와 메모리: 에이전트 간 데이터 바톤 터치하기"**
+
+지금까지 `blog_planner`가 만든 목차를 `blog_validator`가 어떻게 받았는지, `LoopAgent`가 어떻게 성공 여부를 알았는지 궁금하지 않으셨나요?  
+다음 시간에는 **ADK의 세션 상태(Session State)**와 **`output_key`** 메커니즘을 파헤쳐, **에이전트 간 데이터가 어떻게 흐르고 저장되는지** 완벽하게 마스터하겠습니다. 기대해 주세요! 🚀
