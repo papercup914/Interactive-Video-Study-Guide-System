@@ -250,3 +250,14 @@
 - Exclude Data: Ensure that data directories (e.g., `backend/data`, `tmp/`) and database files (`*.sqlite3`, `*.db`) are excluded to prevent committing massive logs, media, or user data.
   <!-- [KR] 데이터 폴더 제외: 대용량 오디오, 텍스트 캐시, DB 파일이 커밋되지 않도록 데이터 디렉토리를 철저히 제외하세요. -->
 </RULE[git_ignore_local_data]>
+
+<RULE[single_endpoint_file_upload]>
+<!-- 
+[KR] 단일 통합 API 엔드포인트 설계 규칙 (Single Endpoint File Upload)
+이 규칙은 텍스트 데이터와 파일 업로드를 함께 처리해야 하는 API 설계 시, 불필요하게 API를 분리하는 것을 방지합니다.
+-->
+- Unified Multipart Endpoint: When designing an API that accepts both text/URL inputs and optional file uploads (e.g., for processing or generation), you MUST default to a single unified endpoint using `multipart/form-data`.
+  <!-- [KR] 단일 통합 Multipart 엔드포인트: 텍스트/URL 입력과 선택적 파일 업로드를 모두 허용하는 API를 설계할 때, 반드시 `multipart/form-data`를 사용하는 단일 통합 엔드포인트를 기본으로 사용해야 합니다. -->
+- Avoid Upload-Then-Process: Do NOT propose splitting the workflow into a separate `/upload` endpoint (which returns a file ID) and a subsequent `/process` endpoint unless strictly necessary for handling extremely large files or resumable uploads.
+  <!-- [KR] 업로드 후 처리 분리 금지: 초대용량 파일 처리나 이어올리기 등 명확한 이유가 없는 한, 파일을 먼저 업로드하고 ID를 받아 다시 처리 요청을 보내는 방식(분리된 엔드포인트)을 제안하지 마세요. -->
+</RULE[single_endpoint_file_upload]>

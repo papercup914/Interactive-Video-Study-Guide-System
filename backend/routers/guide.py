@@ -65,24 +65,39 @@ def _delete_from_history(job_id: str):
     return True
 
 from backend.services.video import download_audio, get_video_title, get_youtube_transcript, get_url_hash
+import tempfile
+import shutil
 
-async def _generate_guide_task(job_id: str, request: GuideRequest):
+async def _generate_guide_task(job_id: str, request: GuideRequest, file_path: str = None):
     try:
-        update_job_status(job_id, "transcribing", "자막 및 오디오 추출 중...")
         loop = asyncio.get_event_loop()
         
-        # 1. 자막 우선 추출
-        transcript = await loop.run_in_executor(None, get_youtube_transcript, request.url)
-        url_hash = get_url_hash(request.url) if transcript else None
-        
-        # 2. 자막이 없으면 오디오 다운로드 후 Whisper 처리
-        if not transcript:
-            update_job_status(job_id, "downloading_audio", "자막 없음. 오디오 다운로드 중...")
-            audio_path = await loop.run_in_executor(None, download_audio, request.url)
-            update_job_status(job_id, "transcribing", "오디오 텍스트 변환(Whisper) 중...")
-            transcript = await loop.run_in_executor(None, process_audio, audio_path, request.provider)
-            url_hash = os.path.splitext(os.path.basename(audio_path))[0]
-        
+        # Determine source type and extract text
+        if file_path:
+            update_job_status(job_id, "transcribing", "PDF 파일에서 텍스트 추출 중 (Gemini Vision)...")
+            from backend.services.source import extract_text_from_pdf
+            transcript = await loop.run_in_executor(None, extract_text_from_pdf, file_path)
+            url_hash = job_id
+            raw_title = os.path.basename(file_path)
+        elif "youtube.com" in request.url or "youtu.be" in request.url:
+            update_job_status(job_id, "transcribing", "유튜브 자막 및 오디오 추출 중...")
+            transcript = await loop.run_in_executor(None, get_youtube_transcript, request.url)
+            url_hash = get_url_hash(request.url) if transcript else None
+            
+            if not transcript:
+                update_job_status(job_id, "downloading_audio", "자막 없음. 오디오 다운로드 중...")
+                audio_path = await loop.run_in_executor(None, download_audio, request.url)
+                update_job_status(job_id, "transcribing", "오디오 텍스트 변환(Whisper) 중...")
+                transcript = await loop.run_in_executor(None, process_audio, audio_path, request.provider)
+                url_hash = os.path.splitext(os.path.basename(audio_path))[0]
+            raw_title = get_video_title(request.url)
+        else:
+            update_job_status(job_id, "transcribing", "웹 페이지 텍스트 추출 중...")
+            from backend.services.source import extract_text_from_web
+            transcript, raw_title = await loop.run_in_executor(None, extract_text_from_web, request.url)
+            import hashlib
+            url_hash = hashlib.md5(request.url.encode()).hexdigest()
+            
         update_job_status(job_id, "generating_outline", "목차 구조 설계 중...")
         sections = await loop.run_in_executor(None, generate_outline, transcript, request.provider, url_hash, request.length_preset)
         
@@ -115,11 +130,12 @@ async def _generate_guide_task(job_id: str, request: GuideRequest):
             return
 
         
-        # Get and translate title
-        raw_title = get_video_title(request.url)
-        from backend.services.llm import translate_title
-        
-        translated_title = await asyncio.get_event_loop().run_in_executor(None, translate_title, raw_title, request.provider)
+        if not file_path:
+            # Get and translate title for URL based sources
+            from backend.services.llm import translate_title
+            translated_title = await asyncio.get_event_loop().run_in_executor(None, translate_title, raw_title, request.provider)
+        else:
+            translated_title = raw_title
         
         update_job_status(job_id, "generating_chapters", "마무리 중...")
 
@@ -135,11 +151,38 @@ async def _generate_guide_task(job_id: str, request: GuideRequest):
         print(f"Job {job_id} failed with error: {error_msg}")
         fail_job(job_id, error_msg)
 
+from fastapi import File, Form, UploadFile
+from typing import Optional
+
 @router.post("/start")
-async def start_guide_generation(request: GuideRequest, background_tasks: BackgroundTasks):
+async def start_guide_generation(
+    background_tasks: BackgroundTasks,
+    url: str = Form(""),
+    file: Optional[UploadFile] = File(None),
+    provider: str = Form(""),
+    length_preset: str = Form("아주 상세하게"),
+    analogy_preset: str = Form("풍부한 비유"),
+    learner_profile: str = Form("")
+):
     job_id = f"job_{uuid.uuid4().hex}"
     create_job(job_id)
-    background_tasks.add_task(_generate_guide_task, job_id, request)
+    
+    file_path = None
+    if file and file.filename:
+        os.makedirs("backend/tmp", exist_ok=True)
+        file_path = f"backend/tmp/{job_id}_{file.filename}"
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+    request = GuideRequest(
+        url=url,
+        provider=provider,
+        length_preset=length_preset,
+        analogy_preset=analogy_preset,
+        learner_profile=learner_profile
+    )
+    
+    background_tasks.add_task(_generate_guide_task, job_id, request, file_path)
     return {"job_id": job_id, "status": "processing"}
 
 @router.get("/status/{job_id}")
