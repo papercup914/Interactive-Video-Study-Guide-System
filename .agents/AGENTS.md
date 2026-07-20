@@ -215,3 +215,38 @@
 - SQLite Over Redis: If an application requires state persistence or job queues but is meant to be a zero-setup local tool, NEVER suggest installing Redis, Postgres, or MongoDB. 
 - Mandatory Fallback: You MUST use local `SQLite` (or standard JSON files) instead to maintain the zero-setup philosophy while achieving persistence.
 </RULE[zero_setup_persistence]>
+
+<RULE[auto_git_commit]>
+<!-- 
+[KR] 자동 Git 커밋 규칙 (Auto Git Commit)
+이 규칙은 AI가 코드 수정 작업을 완료한 직후, 스스로 Git 커밋을 수행하도록 강제합니다.
+-->
+- Commit on Completion: When you have successfully completed a logical feature, bug fix, or code modification task, you MUST automatically execute a git commit using the `run_command` tool (`git add . && git commit -m "..."`).
+- Conventional Commits: The commit message MUST strictly follow the Conventional Commits format. The prefix MUST be in English (e.g., `feat:`, `fix:`), but the description MUST be entirely in Korean.
+- Strict Korean Requirement: NEVER write the commit description in English. 
+  - Correct Example: `feat: 유튜브 자막 추출 로직 및 예외 처리 추가`
+  - Incorrect Example: `feat: add youtube transcript logic`
+</RULE[auto_git_commit]>
+
+<RULE[youtube_transcript_api_usage]>
+<!-- 
+[KR] 유튜브 자막 API (youtube-transcript-api) 사용 규칙
+최신 버전(v1.2+)에서 변경된 API 명세를 준수하도록 강제합니다.
+-->
+- No Static Methods: `youtube-transcript-api` version 1.2+ no longer supports the static method `YouTubeTranscriptApi.list_transcripts(video_id)`.
+  <!-- [KR] 정적 메서드 사용 금지: 1.2버전 이상에서는 `list_transcripts` 정적 메서드가 삭제되었습니다. -->
+- Instantiation Required: You MUST instantiate the API object first, then call `.list()`. 
+  Example: `ytt_api = YouTubeTranscriptApi(); transcript_list = ytt_api.list(video_id)`
+  <!-- [KR] 객체 인스턴스화 필수: 반드시 객체를 먼저 생성(`YouTubeTranscriptApi()`)한 뒤, `.list(video_id)`를 호출해야 합니다. -->
+</RULE[youtube_transcript_api_usage]>
+
+<RULE[git_ignore_local_data]>
+<!-- 
+[KR] 로컬 데이터 Git 추적 제외 규칙
+무설치/로컬 영속성 기반 앱에서 Git 초기화 시 대용량 캐시가 커밋되는 것을 방지합니다.
+-->
+- Gitignore First: Before running `git add .` or initializing a repository for a local-persistence app, you MUST create a `.gitignore` file.
+  <!-- [KR] gitignore 우선 작성: 로컬 캐시나 SQLite를 사용하는 앱에서 Git을 초기화할 때, `git add .`를 실행하기 전에 반드시 `.gitignore` 파일을 먼저 생성하세요. -->
+- Exclude Data: Ensure that data directories (e.g., `backend/data`, `tmp/`) and database files (`*.sqlite3`, `*.db`) are excluded to prevent committing massive logs, media, or user data.
+  <!-- [KR] 데이터 폴더 제외: 대용량 오디오, 텍스트 캐시, DB 파일이 커밋되지 않도록 데이터 디렉토리를 철저히 제외하세요. -->
+</RULE[git_ignore_local_data]>
