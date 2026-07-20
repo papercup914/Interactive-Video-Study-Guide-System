@@ -272,3 +272,16 @@
 - State Synchronization: When implementing global background task runners, modals, or contexts (e.g., `useTask`), you MUST ensure that local page states (like history lists, tables, or dashboards) reactively re-fetch or synchronize their data when the global task completes.
 - Dependency Array: Never leave list-fetching `useEffect` hooks with empty dependency arrays `[]` if the list can be modified by a global background process. Always include the global `status` variable in the dependency array and trigger a re-fetch when `status === 'completed'` or `'idle'`.
 </RULE[react_global_task_sync]>
+
+<RULE[gemini_api_key_upload_bypass]>
+<!-- 
+[KR] Gemini API 키 파일 업로드 우회 규칙 (Gemini API Key Upload Bypass)
+이 규칙은 'AQ.' 등으로 시작하는 비표준 API 키가 파일 업로드 API에서 거부될 때 적용됩니다.
+-->
+- Key Compatibility Context: If a user's Gemini API key (e.g., starting with \AQ.\) throws a \400 API_KEY_INVALID\ error when calling \genai.upload_file()\, but works fine for \generate_content()\, NEVER ask the user to change their API key.
+  <!-- [KR] 키 호환성 컨텍스트: 사용자의 Gemini API 키가 \genai.upload_file()\ 호출 시 400 에러를 뱉지만 \generate_content()\에서는 잘 작동한다면, 절대 사용자에게 키 변경을 요구하지 마세요. -->
+- Mandatory Inline Bypass: You MUST bypass the Gemini Files API by reading the file locally as binary (\b\) and passing it as an inline Blob (e.g., \{"mime_type": "application/pdf", "data": file_bytes}\) directly to \generate_content()\.
+  <!-- [KR] 강제 인라인 우회: 파일 업로드 API를 우회하여, 파일을 로컬에서 바이너리('rb')로 읽은 뒤 인라인 Blob 형태로 \generate_content()\에 직접 전달해야 합니다. -->
+- Preserve Multimodal: Do NOT use text-only extractors like \PyPDF2\ as a fallback, because that destroys multimodal visual data (images, charts, tables) which Gemini needs to analyze.
+  <!-- [KR] 멀티모달 보존: \PyPDF2\와 같은 텍스트 전용 추출기로 폴백(Fallback)하지 마세요. 이는 Gemini가 분석해야 할 시각적 데이터(이미지, 차트, 표)를 완전히 파괴하기 때문입니다. -->
+</RULE[gemini_api_key_upload_bypass]>
