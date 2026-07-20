@@ -5,10 +5,12 @@
 -->
 - The current year is 2026, which means your internal training data may be outdated.
   <!-- [KR] 현재 연도는 2026년이므로, 내부 학습 데이터가 구식일 수 있습니다. -->
-- When asked to use or update to the "latest version", "latest model", or "latest API", NEVER rely solely on your internal knowledge.
-  <!-- [KR] "최신 버전", "최신 모델" 또는 "최신 API"를 사용하거나 업데이트하라는 요청을 받을 때 절대 내부 지식에만 의존하지 마세요. -->
-- Before modifying code, ALWAYS use the `search_web` tool to find and verify the most up-to-date official information for the current year.
-  <!-- [KR] 코드를 수정하기 전에 항상 `search_web` 도구를 사용하여 올해의 가장 최신 공식 정보를 찾고 확인하세요. -->
+- Proactive Verification (Mandatory): You MUST NOT wait for the user to ask for the "latest version". Whenever you encounter, propose, or write code involving an external API, AI model, or third-party library, you MUST proactively use the `search_web` tool to verify its current active status, exact naming, and deprecation state in 2026.
+  <!-- [KR] 선제적 검증(필수): 사용자가 "최신 버전"을 요청할 때까지 기다려서는 안 됩니다. 외부 API, AI 모델 또는 타사 라이브러리와 관련된 코드를 마주하거나 제안하거나 작성할 때마다, 반드시 `search_web` 도구를 사용하여 2026년 현재의 활성 상태, 정확한 명칭 및 지원 종료 여부를 선제적으로 확인해야 합니다. -->
+- Assumption Ban: NEVER assume that a model name (e.g., Gemini 1.5, GPT-4) found in the existing codebase or your training data is still valid or supported. Always search official documentation (e.g., site:google.dev) before taking any action.
+  <!-- [KR] 추측 금지: 기존 코드베이스나 훈련 데이터에 있는 모델명(예: Gemini 1.5, GPT-4)이 여전히 유효하거나 지원된다고 절대 가정하지 마세요. 조치를 취하기 전에 항상 공식 문서(예: site:google.dev)를 검색하세요. -->
+- If you find that a model/API is deprecated, immediately warn the user and propose the 2026 alternative.
+  <!-- [KR] 모델/API가 지원 종료된 것을 발견하면 즉시 사용자에게 경고하고 2026년 대안을 제안하세요. -->
 </RULE[latest_info]>
 
 <RULE[vibe_coding_architect]>

@@ -74,7 +74,7 @@ def extract_text_from_pdf(file_path: str):
             
         print("File is ACTIVE. Extracting text...")
         
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-3.5-flash")
         
         prompt = (
             "이 문서는 PDF 파일입니다. 문서 안의 모든 텍스트, 표(Table), 차트/이미지의 설명(Caption) 등 의미 있는 "
