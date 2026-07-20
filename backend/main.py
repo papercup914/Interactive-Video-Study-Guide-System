@@ -24,6 +24,7 @@ async def health_check():
     """Basic health check endpoint"""
     return {"status": "ok", "message": "API is running"}
 
-from backend.routers import guide
+from backend.routers import guide, discussion
 
 app.include_router(guide.router, prefix="/api/guide", tags=["guide"])
+app.include_router(discussion.router, prefix="/api/discussion", tags=["discussion"])

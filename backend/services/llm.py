@@ -241,9 +241,10 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
     - {analogy_instruction}
     - 개념 돋보기 박스(Markdown 인용구 > 문법 사용)를 만들어 핵심을 짚어줘라.
     - {length_instruction}
-    - [중요] 챕터 본문 작성이 끝난 후, 가장 마지막에 학습자의 이해도를 점검할 수 있는 객관식 퀴즈를 1개 출제하세요.
+    - [중요] 챕터 본문 작성이 끝난 후, 가장 마지막에 학습자의 이해도를 점검할 수 있는 객관식 퀴즈 1개와 심화 학습을 위한 서술형 토론 주제 1개를 출제하세요.
       반드시 아래와 같은 정확한 MDX 커스텀 태그 형식으로만 출력해야 합니다:
       <quiz question="여기에 문제 작성" options="보기1 | 보기2 | 보기3 | 보기4" answer="0" explanation="여기에 튜터 어조로 친절한 정답 해설 작성" />
+      <discussion topic="여기에 심화 학습을 유도하는 서술형 토론 주제를 하나 작성" />
       (answer 값은 정답 보기의 0-based 인덱스 숫자입니다. 예: 첫번째가 정답이면 0)
     """
     
