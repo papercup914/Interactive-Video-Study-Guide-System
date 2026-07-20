@@ -264,3 +264,11 @@
 - Avoid Upload-Then-Process: Do NOT propose splitting the workflow into a separate `/upload` endpoint (which returns a file ID) and a subsequent `/process` endpoint unless strictly necessary for handling extremely large files or resumable uploads.
   <!-- [KR] 업로드 후 처리 분리 금지: 초대용량 파일 처리나 이어올리기 등 명확한 이유가 없는 한, 파일을 먼저 업로드하고 ID를 받아 다시 처리 요청을 보내는 방식(분리된 엔드포인트)을 제안하지 마세요. -->
 </RULE[single_endpoint_file_upload]>
+
+<RULE[react_global_task_sync]>
+<!-- 
+[KR] React 전역 작업과 로컬 상태 동기화 규칙
+-->
+- State Synchronization: When implementing global background task runners, modals, or contexts (e.g., `useTask`), you MUST ensure that local page states (like history lists, tables, or dashboards) reactively re-fetch or synchronize their data when the global task completes.
+- Dependency Array: Never leave list-fetching `useEffect` hooks with empty dependency arrays `[]` if the list can be modified by a global background process. Always include the global `status` variable in the dependency array and trigger a re-fetch when `status === 'completed'` or `'idle'`.
+</RULE[react_global_task_sync]>
