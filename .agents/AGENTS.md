@@ -165,6 +165,7 @@
 -->
 - Next.js 15+ Tunneling: When tunneling a Next.js application to the outside world (e.g., using Cloudflare Tunnels, ngrok, localtunnel), NEVER use the dev server (`npm run dev`) as the strict host checks and WebSocket HMR will block connections and cause infinite loading.
 - Mandatory Fix: You MUST switch the application to production mode (`npm run build && npm run start`) before exposing the port to bypass development origin checks.
+- Mandatory Rebuild on Edit: Because the application is running in production mode, Hot Module Replacement (HMR) is disabled. If you modify any frontend code (.tsx, .css, etc.), you MUST kill the running Next.js background task, run `npm run build` again, and restart it before telling the user to refresh the browser.
 </RULE[nextjs_tunneling_production_mode]>
 
 <RULE[react_large_list_virtualization]>
