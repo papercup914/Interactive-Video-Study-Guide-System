@@ -1,4 +1,4 @@
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+﻿[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host "🚀 스터디 가이드 생성기 - 외부 공개 터널링 (Cloudflare)" -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
@@ -55,7 +55,8 @@ $urlSent = $false
                 text = $message
             }
             try {
-                Invoke-RestMethod -Uri $telegramApiUrl -Method Post -Body $body | Out-Null
+                $jsonBody = $body | ConvertTo-Json
+                Invoke-RestMethod -Uri $telegramApiUrl -Method Post -ContentType "application/json; charset=utf-8" -Body $jsonBody | Out-Null
                 Write-Host "✅ 텔레그램 전송 완료! 휴대폰을 확인하세요." -ForegroundColor Green
             } catch {
                 Write-Host "❌ 텔레그램 전송 실패: $_" -ForegroundColor Red
