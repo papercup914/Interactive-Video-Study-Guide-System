@@ -264,24 +264,38 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
     loop = asyncio.get_event_loop()
     
     def _call_api():
-        if provider == "Google Gemini":
-            client = get_gemini_client()
-            response = client.models.generate_content(
-                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
-                contents=[chunked_context, system_prompt]
-            )
-            return response.text
-        else:
-            target_model = "gpt-4o" if provider == "OpenAI (GPT-4o)" else provider
-            client = get_openai_client(provider)
-            response = client.chat.completions.create(
-                model=target_model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"다음은 분석할 원본 영상 전체 스크립트입니다:\n\n{chunked_context}"}
-                ]
-            )
-            return response.choices[0].message.content
+        max_retries = 5
+        base_delay = 5
+        
+        for attempt in range(max_retries):
+            try:
+                if provider == "Google Gemini":
+                    client = get_gemini_client()
+                    response = client.models.generate_content(
+                        model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
+                        contents=[chunked_context, system_prompt]
+                    )
+                    return response.text
+                else:
+                    target_model = "gpt-4o" if provider == "OpenAI (GPT-4o)" else provider
+                    client = get_openai_client(provider)
+                    response = client.chat.completions.create(
+                        model=target_model,
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": f"다음은 분석할 원본 영상 전체 스크립트입니다:\n\n{chunked_context}"}
+                        ]
+                    )
+                    return response.choices[0].message.content
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    import time
+                    print(f"API Error ({e}). Retrying in {delay} seconds... (Attempt {attempt+1}/{max_retries})")
+                    time.sleep(delay)
+                else:
+                    print(f"API Error ({e}). Max retries reached.")
+                    raise e
 
     result = await loop.run_in_executor(None, _call_api)
     

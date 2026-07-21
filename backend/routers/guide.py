@@ -104,8 +104,9 @@ async def _generate_guide_task(job_id: str, request: GuideRequest, file_path: st
         document = {}
         total_sections = len(sections)
         
-        # Concurrency limit setup
-        semaphore = asyncio.Semaphore(3)
+        # Concurrency limit setup based on job size to prevent Rate Limits
+        concurrency_limit = 1 if total_sections > 20 else 3
+        semaphore = asyncio.Semaphore(concurrency_limit)
         
         async def process_section(idx: int, section_title: str):
             async with semaphore:
@@ -122,7 +123,14 @@ async def _generate_guide_task(job_id: str, request: GuideRequest, file_path: st
                 
         # Run all sections concurrently with limit
         tasks = [process_section(i, section) for i, section in enumerate(sections)]
-        await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Handle complete failures for specific sections
+        for i, res in enumerate(results):
+            if isinstance(res, Exception):
+                print(f"Warning: Section {i+1} failed completely despite retries: {res}")
+                section_title = sections[i]
+                document[section_title] = "> [!WARNING]\n> API 서버 일시적 한계(Rate Limit 등)로 인해 해당 챕터를 생성하지 못했습니다. 추후 처음부터 다시 시도해주세요. (기존 생성분은 복구됩니다.)"
         
         job = get_job(job_id)
         if job and job.get("status") == "cancelled":
