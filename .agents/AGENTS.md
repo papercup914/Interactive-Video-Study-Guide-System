@@ -87,6 +87,8 @@
     <!-- [KR] 형식: <!-- [KR] 한국어 번역 또는 설명 --\> -->
 - Applies to all documentation, DESIGN.md, plans, and READMEs.
   <!-- [KR] 모든 문서, DESIGN.md, 기획서 및 README에 적용됩니다. -->
+- EXCEPTION: Do NOT apply this rule to internal AI configuration files (like `AGENTS.md` or `.agents/AGENTS.md`) to save tokens and optimize costs. Write config files strictly in English.
+  <!-- [KR] 예외: 토큰 절약 및 비용 최적화를 위해 `AGENTS.md`와 같은 내부 AI 설정 파일에는 이 규칙을 적용하지 마세요. 설정 파일은 영문으로만 작성합니다. -->
 </RULE[markdown_language_override]>
 
 <RULE[design_first_development]>
