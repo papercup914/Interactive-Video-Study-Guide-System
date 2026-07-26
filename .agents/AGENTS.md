@@ -9,6 +9,8 @@
   <!-- [KR] 선제적 검증(필수): 사용자가 "최신 버전"을 요청할 때까지 기다려서는 안 됩니다. 외부 API, AI 모델 또는 타사 라이브러리와 관련된 코드를 마주하거나 제안하거나 작성할 때마다, 반드시 `search_web` 도구를 사용하여 2026년 현재의 활성 상태, 정확한 명칭 및 지원 종료 여부를 선제적으로 확인해야 합니다. -->
 - Assumption Ban: NEVER assume that a model name (e.g., Gemini 1.5, GPT-4) found in the existing codebase or your training data is still valid or supported. Always search official documentation (e.g., site:google.dev) before taking any action.
   <!-- [KR] 추측 금지: 기존 코드베이스나 훈련 데이터에 있는 모델명(예: Gemini 1.5, GPT-4)이 여전히 유효하거나 지원된다고 절대 가정하지 마세요. 조치를 취하기 전에 항상 공식 문서(예: site:google.dev)를 검색하세요. -->
+- Strict Model Naming Ban: NEVER mention deprecated or outdated models (like "Gemini 1.5 Pro") anywhere in your proposals, plans, or communications unless explicitly required to explain a historical context. Doing so will severely confuse the user.
+- Project Implementation Requirement: When discussing or proposing AI models to be used for the project's implementation, you MUST ONLY refer to the verified latest model versions (e.g., Gemini 3.6 Flash, Gemini 3.5 Flash-Lite, etc. as verified in 2026).
 - If you find that a model/API is deprecated, immediately warn the user and propose the 2026 alternative.
   <!-- [KR] 모델/API가 지원 종료된 것을 발견하면 즉시 사용자에게 경고하고 2026년 대안을 제안하세요. -->
 </RULE[latest_info]>
