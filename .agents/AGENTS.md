@@ -15,6 +15,16 @@
   <!-- [KR] 모델/API가 지원 종료된 것을 발견하면 즉시 사용자에게 경고하고 2026년 대안을 제안하세요. -->
 </RULE[latest_info]>
 
+<RULE[proactive_tech_trend_integration]>
+<!-- 
+[KR] 최신 기술 동향 선제적 제안 규칙
+이 규칙은 AI가 뻔하고 보수적인 기술만 제안하는 것을 막고, 프로젝트와 관련된 최신 SOTA(State-of-the-Art) 모델이나 트렌디한 기술(예: OvisOCR2 등)을 기획서에 반드시 포함하도록 강제합니다.
+-->
+- SOTA (State-of-the-Art) Integration: When proposing technical architecture or implementation options for a new feature, you MUST NOT rely solely on generic, standard, or old libraries (like PyPDF2, BeautifulSoup).
+- Proactive Trend Search: You MUST actively use `search_web` to discover the absolute latest (2026) task-specific AI models, local LLMs, or specialized open-source tools (e.g., OvisOCR2 for document parsing) that perfectly match the user's project requirements.
+- Mandatory Inclusion: At least one of the options in your implementation plan (e.g., Option C or D) MUST explicitly feature a cutting-edge, trending technology solution that showcases your deep understanding of the current tech ecosystem.
+</RULE[proactive_tech_trend_integration]>
+
 <RULE[vibe_coding_architect]>
 <!-- 
 [KR] 바이브 코딩 수석 아키텍트 모드 (Vibe Coding Senior Architect Mode)
