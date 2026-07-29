@@ -14,9 +14,44 @@ def get_gemini_client():
         raise ValueError("GEMINI_API_KEY 환경 변수가 설정되지 않았습니다.")
     return genai.Client(api_key=api_key)
 
+_gemini_cache_map = {}
+
+def get_or_create_document_cache(file_name: str, model_id: str):
+    """
+    Creates an explicit Context Cache for a large uploaded file.
+    This reduces input token costs by 75%+ for subsequent queries.
+    """
+    if file_name in _gemini_cache_map:
+        return _gemini_cache_map[file_name]
+        
+    client = get_gemini_client()
+    uploaded_file = client.files.get(name=file_name)
+    
+    from google.genai import types
+    cache = client.caches.create(
+        model=model_id,
+        config=types.CreateCachedContentConfig(
+            contents=[uploaded_file],
+            ttl="3600s",
+            display_name=f"cache_{file_name}"
+        )
+    )
+    _gemini_cache_map[file_name] = cache.name
+    print(f"[Gemini Cache] Explicit Context Cache created: {cache.name}")
+    return cache.name
+
+
 def get_openai_client(provider: str = None):
     api_key = None
-    if provider == "glm-5.2":
+    base_url = os.getenv("OPENAI_BASE_URL")
+    
+    if provider == "cerebras/gpt-oss-120b":
+        api_key = os.getenv("CEREBRAS_API_KEY")
+        if not api_key:
+            raise ValueError("CEREBRAS_API_KEY 환경 변수가 설정되지 않았습니다. .env 파일을 확인해주세요.")
+        # Cerebras API is OpenAI compatible, so we can use the OpenAI client by pointing to their endpoint
+        base_url = "https://api.cerebras.ai/v1"
+    elif provider == "glm-5.2":
         api_key = os.getenv("GLM_API_KEY", api_key)
     elif provider == "nvidia/nemotron-3-ultra-550b-a55b":
         api_key = os.getenv("NEMOTRON_3_ULTRA_API_KEY")
@@ -32,7 +67,6 @@ def get_openai_client(provider: str = None):
         raise ValueError(f"{provider if provider else 'OpenAI'} 모델을 위한 API_KEY 환경 변수가 설정되지 않았습니다. .env 파일을 확인해주세요.")
     
     # API 키가 NVIDIA 형식(nvapi-)인 경우 기본 Base URL 설정
-    base_url = os.getenv("OPENAI_BASE_URL")
     if not base_url and api_key.startswith("nvapi-"):
         base_url = "https://integrate.api.nvidia.com/v1"
         
@@ -129,6 +163,68 @@ def process_audio(audio_path: str, provider: str) -> str:
         
     return transcript
 
+async def async_map_reduce_transcript(transcript: str, provider: str, url_hash: str) -> str:
+    """
+    Map-Reduce 아키텍처: 대용량 스크립트를 여러 청크로 나누어 병렬 요약한 뒤, 하나로 합쳐 마스터 요약본을 만듭니다.
+    """
+    if len(transcript) < 20000:
+        return transcript
+        
+    cache_file = os.path.join("backend/data", f"{url_hash}_master_summary.txt")
+    if os.path.exists(cache_file):
+        with open(cache_file, "r", encoding="utf-8") as f:
+            return f.read()
+
+    chunk_size = 5000
+    overlap = 500
+    chunks = []
+    
+    start = 0
+    while start < len(transcript):
+        end = min(start + chunk_size, len(transcript))
+        chunks.append(transcript[start:end])
+        start += (chunk_size - overlap)
+        
+    print(f"[Map-Reduce] 텍스트 길이 {len(transcript)}자 -> {len(chunks)}개 청크로 분할하여 병렬 요약 시작...")
+    
+    semaphore = asyncio.Semaphore(10)
+    
+    async def summarize_chunk(idx: int, chunk: str) -> str:
+        async with semaphore:
+            prompt = f"다음은 영상 스크립트의 일부입니다. 이 내용에서 다루는 모든 핵심 개념, 중요한 인용구, 그리고 논리적 흐름을 빠짐없이 요약하세요. 원본의 정보가 유실되지 않도록 상세히 작성하세요.\n\n[스크립트 일부 시작]\n{chunk}\n[스크립트 일부 끝]"
+            
+            client = get_openai_client(provider)
+            target_model = provider
+            if provider == "OpenAI (GPT-4o)":
+                target_model = "gpt-4o"
+            elif provider == "cerebras/gpt-oss-120b":
+                target_model = "gpt-oss-120b"
+                
+            try:
+                response = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: client.chat.completions.create(
+                        model=target_model,
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=1500
+                    )
+                )
+                return f"\n\n--- [Part {idx+1}] ---\n{response.choices[0].message.content}"
+            except Exception as e:
+                print(f"Error summarizing chunk {idx+1}: {e}")
+                return f"\n\n--- [Part {idx+1}] ---\n(요약 실패 - 원본 일부 포함)\n{chunk[:500]}..."
+
+    tasks = [summarize_chunk(i, chunk) for i, chunk in enumerate(chunks)]
+    results = await asyncio.gather(*tasks)
+    
+    master_summary = "".join(results)
+    print(f"[Map-Reduce] 마스터 요약본 완성! 길이: {len(master_summary)}자")
+    
+    with open(cache_file, "w", encoding="utf-8") as f:
+        f.write(master_summary)
+        
+    return master_summary
+
 def generate_outline(context_data: str, provider: str, url_hash: str, length_preset: str = "아주 상세하게") -> List[str]:
     """
     오디오 컨텍스트를 분석하여 상세 목차를 생성하고 로컬에 캐시합니다.
@@ -139,12 +235,39 @@ def generate_outline(context_data: str, provider: str, url_hash: str, length_pre
         with open(cache_file, "r", encoding="utf-8") as f:
             return json.load(f)
 
+    char_count = len(context_data)
+    
     if length_preset == "핵심 요약":
-        outline_instruction = "전체 내용을 단 3~5개의 핵심 챕터로 굵직하게 요약해서 묶어줘."
+        target_chapters = max(3, min(5, char_count // 10000))
+        outline_instruction = f"전체 내용을 {target_chapters}개의 핵심 챕터로 굵직하게 요약해서 묶어줘."
     elif length_preset == "적당한 설명":
-        outline_instruction = "전체 내용을 7~10개 내외의 적절한 분량의 챕터로 나누어줘."
+        target_chapters = max(5, min(12, char_count // 5000))
+        outline_instruction = f"전체 내용을 {target_chapters}개 내외의 적절한 분량의 챕터로 나누어줘."
     else:
-        outline_instruction = "전체 내용을 생략 없이 방대한 분량의 학습 문서로 만들 수 있도록 챕터별로 아주 잘게 쪼개야 해."
+        target_chapters = max(7, min(20, char_count // 2500))
+        outline_instruction = f"전체 내용의 디테일을 놓치지 않으면서도, 인지적 과부하가 오지 않도록 전체 흐름을 정확히 {target_chapters}개의 챕터로 나누어 세분화해줘. 각 챕터는 독립적이고 논리적인 하나의 큰 주제를 다루어야 해."
+
+    sections = []
+    
+    # If this is from a document (PDF/Web), do NOT generate an artificial outline.
+    # Just parse the existing Markdown headers, or return a single section.
+    # We can detect this if url_hash corresponds to a document (length_preset could be '문서 원본 번역')
+    # Or we can just add a parameter `is_document=False`. For now let's check `length_preset`.
+    if length_preset == "문서 원본 번역":
+        # 만약 원본 텍스트 길이가 충분히 짧다면 분할하지 않고 한 번에 번역 (API 호출 횟수 최적화 및 속도 향상)
+        # Jina AI 파싱 시 UI 요소 등으로 인해 텍스트 길이가 길게(3~4만 자) 측정될 수 있으므로 임계값을 50,000자로 상향
+        if len(context_data) < 50000:
+            return ["전체 문서"]
+            
+        for line in context_data.split("\n"):
+            # 너무 잘게 쪼개져 수십 개의 챕터가 생성되는 것을 방지하기 위해 #, ## 레벨까지만 목차로 추출
+            if line.startswith("# ") or line.startswith("## "):
+                clean_header = line.lstrip("# ").strip()
+                if clean_header and clean_header not in sections:
+                    sections.append(clean_header)
+        if not sections:
+            sections = ["전체 문서"]
+        return sections
 
     prompt = f"""
     주어진 내용(오디오 또는 스크립트)을 분석하여 학습용 목차(Outline)를 작성해줘.
@@ -154,13 +277,25 @@ def generate_outline(context_data: str, provider: str, url_hash: str, length_pre
     
     if provider == "Google Gemini":
         client = get_gemini_client()
+        if context_data.startswith("GEMINI_FILE_URI::"):
+            file_name = context_data.split("::")[1]
+            uploaded_file = client.files.get(name=file_name)
+            contents_payload = [uploaded_file, prompt]
+        else:
+            contents_payload = [context_data, prompt]
+            
         response = client.models.generate_content(
             model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
-            contents=[context_data, prompt]
+            contents=contents_payload
         )
         outline_raw = response.text
     else:
-        target_model = "gpt-4o" if provider == "OpenAI (GPT-4o)" else provider
+        target_model = provider
+        if provider == "OpenAI (GPT-4o)":
+            target_model = "gpt-4o"
+        elif provider == "cerebras/gpt-oss-120b":
+            target_model = "gpt-oss-120b"
+            
         client = get_openai_client(provider)
         response = client.chat.completions.create(
             model=target_model,
@@ -171,7 +306,6 @@ def generate_outline(context_data: str, provider: str, url_hash: str, length_pre
         )
         outline_raw = response.choices[0].message.content
         
-    sections = []
     for line in outline_raw.split("\n"):
         clean_line = line.strip().lstrip('1234567890.-*# ')
         if clean_line:
@@ -204,45 +338,68 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
 
     chunked_context = context_data
     
-    if length_preset == "핵심 요약":
-        length_instruction = "전체적인 흐름만 파악할 수 있도록 3~5문장 내외로 아주 간결하게 핵심만 요약해라."
-    elif length_preset == "적당한 설명":
-        length_instruction = "너무 길지 않게, 핵심 내용을 포함하여 적절한 분량으로 설명해라."
+    if len(context_data) > 30000 and section_title != "전체 문서" and section_title != "전체 내용 요약":
+        # Map-Reduce 아키텍처가 적용된 경우 context_data는 이미 1~2만 자 수준의 master_summary이므로 이 로직을 탈 필요가 없습니다.
+        # 단, 예외적으로 매우 큰 문서가 통과될 경우를 대비해 수학적 오버랩 분할(Mathematical Chunking) 로직을 Fallback으로 남겨둡니다.
+        chunk_size = len(context_data) // total_chunks
+        overlap = chunk_size // 5
+        start_idx = max(0, chunk_index * chunk_size - overlap)
+        end_idx = min(len(context_data), (chunk_index + 1) * chunk_size + overlap)
+        chunked_context = context_data[start_idx:end_idx]
+        print(f"[Optimization] Math Chunked context for '{section_title}': {len(chunked_context)} chars (Original: {len(context_data)} chars)")
+    
+    if length_preset == "문서 원본 번역":
+        # Document translation mode: 1:1 translation keeping markdown images intact
+        system_prompt = f"""
+        당신은 전문 번역가입니다. 
+        제공된 원본 문서(마크다운 형태)에서 챕터 제목 '{section_title}' 부분에 해당하는 내용(하위 섹션 포함)을 추출한 뒤,
+        그 내용을 완벽하게 한국어로 1:1 번역하여 출력하세요.
+        
+        [매우 중요] 
+        - 문서에 포함된 표(Table) 형태나 마크다운 이미지 태그(예: `![caption](url)`)는 절대 수정하거나 삭제하지 말고 제자리에 그대로 유지하십시오.
+        - 내용을 임의로 요약하거나 튜터와 같은 말투를 쓰지 마십시오. 오직 원문을 한국어로 직역(Professional Translation)만 하십시오.
+        - 만약 '{section_title}'이 "전체 문서"라면 제공된 원본 전체를 처음부터 끝까지 빠짐없이 번역하십시오.
+        """
     else:
-        length_instruction = "절대 내용을 요약하지 말고 최대한 친절하고 길게 풀어서 작성해라."
-
-    if analogy_preset == "비유 없이 담백하게":
-        analogy_instruction = "비유를 배제하고 전문 용어를 살려 담백하고 객관적으로 설명해라."
-    elif analogy_preset == "적절한 비유 추가":
-        analogy_instruction = "이해하기 어려운 개념이 나올 때만 가벼운 비유를 하나 정도 추가해라."
-    else:
-        analogy_instruction = "어려운 기술 용어나 복잡한 개념이 등장할 때마다 일상적인 비유(요리, 식당, 교통 등)를 먼저 제시해라."
-
-    system_prompt = f"""
-    당신은 영상 내용을 기반으로 학습 가이드를 작성하는 튜터입니다.
-    제공된 [전체 스크립트]를 문맥적으로 분석하여, 다음 챕터 제목(또는 주제)에 해당하는 내용을 찾아 챕터 본문을 작성해줘.
-    챕터 제목은 스크립트의 특정 부분을 요약한 것이므로, 정확히 같은 단어가 없더라도 의미상 관련된 내용을 찾아야 해.
-    단, 전체 스크립트를 아무리 살펴봐도 해당 주제와 관련된 내용이 아예 존재하지 않을 때만 예외적으로 "해당 내용을 영상에서 찾을 수 없습니다."라고 출력해.
+        if length_preset == "핵심 요약":
+            length_instruction = "전체적인 흐름만 파악할 수 있도록 3~5문장 내외로 아주 간결하게 핵심만 요약해라."
+        elif length_preset == "적당한 설명":
+            length_instruction = "너무 길지 않게, 핵심 내용을 포함하여 적절한 분량으로 설명해라."
+        else:
+            length_instruction = "절대 내용을 요약하지 말고 최대한 친절하고 길게 풀어서 작성해라."
     
-    챕터 제목: {section_title}
+        if analogy_preset == "비유 없이 담백하게":
+            analogy_instruction = "비유를 배제하고 전문 용어를 살려 담백하고 객관적으로 설명해라."
+        elif analogy_preset == "적절한 비유 추가":
+            analogy_instruction = "이해하기 어려운 개념이 나올 때만 가벼운 비유를 하나 정도 추가해라."
+        else:
+            analogy_instruction = "어려운 기술 용어나 복잡한 개념이 등장할 때마다 일상적인 비유(요리, 식당, 교통 등)를 먼저 제시해라."
     
-    <PERSONA_DIRECTIVE>
-    당신은 무미건조한 AI가 아닙니다. 아래의 [학습자 프로필]에 100% 빙의하여 맞춤형 튜터로 행동하십시오.
-    
-    [학습자 프로필]
-    {learner_profile if learner_profile else "일반적인 성인 학습자"}
-    
-    1. 어조 강제: 학습자 프로필에 명시된 '원하는 튜터 어조'를 본문 전체에 걸쳐 철저하게 유지하십시오.
-    2. 비유 강제: 어려운 개념을 설명할 때는 반드시 프로필에 명시된 '주요 관심사'와 관련된 메타포(비유)를 하나 이상 들어 설명하십시오. 
-    3. 눈높이 강제: '학습 목표'와 '연령대/직업'에 맞추어 전문 용어의 사용 수준과 설명의 깊이를 조절하십시오.
-    </PERSONA_DIRECTIVE>
-    
-    프롬프트 가이드라인:
-    - {analogy_instruction}
-    - 개념 돋보기 박스(Markdown 인용구 > 문법 사용)를 만들어 핵심을 짚어줘라.
-    - {length_instruction}
-    - [중요] 챕터 본문 작성이 끝난 후, 가장 마지막에 학습자의 이해도를 점검할 수 있는 객관식 퀴즈 1~2개와 심화 학습을 위한 서술형 토론 주제 1개를 출제하세요.
-      퀴즈는 반드시 아래와 같이 JSON 배열을 `<quiz></quiz>` 태그로 감싸는 정확한 형식으로만 출력해야 합니다 (모든 오답에 대한 개별 해설 포함 필수):
+        system_prompt = f"""
+        당신은 영상 내용을 기반으로 학습 가이드를 작성하는 튜터입니다.
+        제공된 [전체 스크립트]를 문맥적으로 분석하여, 다음 챕터 제목(또는 주제)에 해당하는 내용을 찾아 챕터 본문을 작성해줘.
+        챕터 제목은 스크립트의 특정 부분을 요약한 것이므로, 정확히 같은 단어가 없더라도 의미상 관련된 내용을 찾아야 해.
+        단, 전체 스크립트를 아무리 살펴봐도 해당 주제와 관련된 내용이 아예 존재하지 않을 때만 예외적으로 "해당 내용을 영상에서 찾을 수 없습니다."라고 출력해.
+        
+        챕터 제목: {section_title}
+        
+        <PERSONA_DIRECTIVE>
+        당신은 무미건조한 AI가 아닙니다. 아래의 [학습자 프로필]에 100% 빙의하여 맞춤형 튜터로 행동하십시오.
+        
+        [학습자 프로필]
+        {learner_profile if learner_profile else "일반적인 성인 학습자"}
+        
+        1. 어조 강제: 학습자 프로필에 명시된 '원하는 튜터 어조'를 본문 전체에 걸쳐 철저하게 유지하십시오.
+        2. 비유 강제: 어려운 개념을 설명할 때는 반드시 프로필에 명시된 '주요 관심사'와 관련된 메타포(비유)를 하나 이상 들어 설명하십시오. 
+        3. 눈높이 강제: '학습 목표'와 '연령대/직업'에 맞추어 전문 용어의 사용 수준과 설명의 깊이를 조절하십시오.
+        </PERSONA_DIRECTIVE>
+        
+        프롬프트 가이드라인:
+        - {analogy_instruction}
+        - 개념 돋보기 박스(Markdown 인용구 > 문법 사용)를 만들어 핵심을 짚어줘라.
+        - {length_instruction}
+        - [중요] 챕터 본문 작성이 끝난 후, 가장 마지막에 학습자의 이해도를 점검할 수 있는 객관식 퀴즈 1~2개와 심화 학습을 위한 서술형 토론 주제 1개를 출제하세요.
+        퀴즈는 반드시 아래와 같이 JSON 배열을 `<quiz></quiz>` 태그로 감싸는 정확한 형식으로만 출력해야 합니다 (모든 오답에 대한 개별 해설 포함 필수):
       <quiz>
       [
         {{
@@ -271,13 +428,46 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
             try:
                 if provider == "Google Gemini":
                     client = get_gemini_client()
-                    response = client.models.generate_content(
-                        model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
-                        contents=[chunked_context, system_prompt]
-                    )
-                    return response.text
+                    if chunked_context.startswith("GEMINI_FILE_URI::"):
+                        file_name = chunked_context.split("::")[1]
+                        model_id = os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite")
+                        
+                        try:
+                            # Context Caching 적용 (Option B)
+                            cache_name = get_or_create_document_cache(file_name, model_id)
+                            from google.genai import types
+                            response = client.models.generate_content(
+                                model=model_id,
+                                contents=[system_prompt], # System prompt is passed per chapter
+                                config=types.GenerateContentConfig(
+                                    cached_content=cache_name
+                                )
+                            )
+                            return response.text
+                        except Exception as cache_e:
+                            print(f"[Gemini Cache] Failed to use explicit cache: {cache_e}. Falling back to normal upload.")
+                            uploaded_file = client.files.get(name=file_name)
+                            contents_payload = [uploaded_file, system_prompt]
+                            response = client.models.generate_content(
+                                model=model_id,
+                                contents=contents_payload
+                            )
+                            return response.text
+                    else:
+                        contents_payload = [chunked_context, system_prompt]
+                        
+                        response = client.models.generate_content(
+                            model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
+                            contents=contents_payload
+                        )
+                        return response.text
                 else:
-                    target_model = "gpt-4o" if provider == "OpenAI (GPT-4o)" else provider
+                    target_model = provider
+                    if provider == "OpenAI (GPT-4o)":
+                        target_model = "gpt-4o"
+                    elif provider == "cerebras/gpt-oss-120b":
+                        target_model = "gpt-oss-120b"
+                        
                     client = get_openai_client(provider)
                     response = client.chat.completions.create(
                         model=target_model,
@@ -346,7 +536,12 @@ def generate_answer(selected_text: str, context: str, question: str, provider: s
         )
         return response.text
     else:
-        target_model = "gpt-4o" if provider == "OpenAI (GPT-4o)" else provider
+        target_model = provider
+        if provider == "OpenAI (GPT-4o)":
+            target_model = "gpt-4o"
+        elif provider == "cerebras/gpt-oss-120b":
+            target_model = "gpt-oss-120b"
+            
         client = get_openai_client(provider)
         response = client.chat.completions.create(
             model=target_model,
@@ -380,7 +575,12 @@ def translate_title(title: str, provider: str) -> str:
             )
             return response.text.strip().strip('"')
         else:
-            target_model = "gpt-4o" if provider == "OpenAI (GPT-4o)" else provider
+            target_model = provider
+            if provider == "OpenAI (GPT-4o)":
+                target_model = "gpt-4o"
+            elif provider == "cerebras/gpt-oss-120b":
+                target_model = "gpt-oss-120b"
+            
             client = get_openai_client(provider)
             response = client.chat.completions.create(
                 model=target_model,
@@ -430,3 +630,61 @@ def extract_image_keyword(title: str, provider: str) -> str:
     except Exception as e:
         print(f"Keyword extraction failed: {str(e)}")
         return "study"
+
+def profile_content(context_data: str, provider: str) -> dict:
+    """
+    Analyzes the beginning of the transcript to dynamically profile the content type 
+    and recommend optimal generation settings.
+    """
+    sample_text = context_data[:5000] if len(context_data) > 5000 else context_data
+    
+    prompt = f"""
+    You are an expert AI content profiler. Analyze the following transcript sample and determine its content type, information density, and target audience.
+    Based on your analysis, choose the most appropriate settings for generating a study guide.
+
+    Output MUST be a valid JSON object without any markdown formatting. Use this EXACT schema:
+    {{
+        "length_preset": "핵심 요약" | "적당한 설명" | "아주 상세하게",
+        "analogy_preset": "비유 없이 담백하게" | "적절한 비유 추가" | "풍부한 비유",
+        "profile_message": "A short, friendly Korean message explaining your decision (e.g., '💡 AI가 전문적인 IT 강의로 인식하여 비유 없이 상세하게 정리합니다.')"
+    }}
+
+    Transcript Sample:
+    {sample_text}
+    """
+    
+    try:
+        if provider == "Google Gemini":
+            client = get_gemini_client()
+            response = client.models.generate_content(
+                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
+                contents=[prompt]
+            )
+            raw_text = response.text.strip()
+        else:
+            client = get_openai_client(provider)
+            target_model = "gpt-4o-mini" if provider == "OpenAI (GPT-4o)" else provider
+            response = client.chat.completions.create(
+                model=target_model,
+                messages=[
+                    {"role": "system", "content": "Output valid JSON only."},
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            raw_text = response.choices[0].message.content.strip()
+            
+        if raw_text.startswith("```json"):
+            raw_text = raw_text[7:]
+        if raw_text.startswith("```"):
+            raw_text = raw_text[3:]
+        if raw_text.endswith("```"):
+            raw_text = raw_text[:-3]
+            
+        return json.loads(raw_text.strip())
+    except Exception as e:
+        print(f"Profiling failed: {str(e)}")
+        return {
+            "length_preset": "적당한 설명",
+            "analogy_preset": "적절한 비유 추가",
+            "profile_message": "💡 영상 길이에 맞는 기본 설정으로 정리했습니다."
+        }

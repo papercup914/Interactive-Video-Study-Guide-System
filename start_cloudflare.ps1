@@ -1,4 +1,5 @@
-﻿[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host "🚀 스터디 가이드 생성기 - 외부 공개 터널링 (Cloudflare)" -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
@@ -37,7 +38,7 @@ $chatId = [Environment]::GetEnvironmentVariable("TELEGRAM_CHAT_ID")
 $urlSent = $false
 
 # cloudflared의 오류 출력(stderr)을 표준 출력(stdout)으로 합쳐서 한 줄씩 가로채기
-& .\cloudflared.exe tunnel --url http://localhost:3000 --http-host-header "localhost" 2>&1 | ForEach-Object {
+cmd /c ".\cloudflared.exe tunnel --url http://localhost:3000 --http-host-header `"localhost`" 2>&1" | ForEach-Object {
     $line = $_.ToString()
     Write-Host $line
     

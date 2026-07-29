@@ -2,3 +2,14 @@ fastapi
 uvicorn
 python-dotenv
 pydantic
+pymupdf
+torch
+transformers
+accelerate
+pillow
+beautifulsoup4
+google-generativeai
+youtube-transcript-api
+requests
+chromadb
+google-genai

@@ -105,16 +105,27 @@
 
 <RULE[design_first_development]>
 <!-- 
-[KR] 디자인 우선 개발 규칙 (Design-First Development)
-이 규칙은 UI/UX 디자인 변경 시 코드를 먼저 작성하기 전에 DESIGN.md 파일을 최우선으로 업데이트하도록 강제합니다.
+[KR] 설계 명세 우선 개발 규칙 (Design & Spec First Development)
+이 규칙은 UI/UX 디자인이나 백엔드/프론트엔드의 구조적인 변경(새로운 기능, 아키텍처 변경 등) 시, 코드를 작성하기 전에 반드시 DESIGN.md 파일을 최우선으로 업데이트하도록 강제합니다.
 -->
-- Specification First: When implementing UI/UX design changes, you MUST update `DESIGN.md` first to reflect the new requirements and decisions.
-  <!-- [KR] 명세 우선: UI/UX 디자인 변경 사항을 구현할 때는 항상 `DESIGN.md`를 먼저 업데이트하여 새로운 요구사항과 결정사항을 반영해야 합니다. -->
-- Anchor to Spec: Use the newly updated `DESIGN.md` as the anchor and single source of truth when subsequently modifying the actual codebase (e.g., TSX, CSS).
-  <!-- [KR] 명세를 기준으로 삼기: 나중에 실제 코드베이스(예: TSX, CSS)를 수정할 때 새롭게 업데이트된 `DESIGN.md`를 유일한 진실의 원천(Single source of truth)이자 기준으로 사용하세요. -->
-- Prevent Vibe Clash: This rule guarantees that visual consistency and CSS tokens (like Tailwind classes) are well-documented and thoughtfully chosen before code generation, preventing fragmentation across files.
-  <!-- [KR] 파편화 방지: 이 규칙은 코드 생성 전에 시각적 일관성과 CSS 토큰(예: Tailwind 클래스)이 문서화되고 신중하게 선택되도록 보장하여, 여러 파일에 걸쳐 디자인이 파편화되는 것을 방지합니다. -->
+- Continuous Specification Update: Whenever you implement new features, architectural changes, or UI/UX updates, you MUST first document these changes in `DESIGN.md`.
+  <!-- [KR] 지속적인 명세 업데이트 강제: 새로운 기능, 아키텍처 변경, 또는 UI/UX 디자인 변경 사항을 구현할 때는 항상 `DESIGN.md`를 최우선으로 업데이트하여 반영해야 합니다. -->
+- Anchor to Spec: Use the continuously updated `DESIGN.md` as the anchor and single source of truth when subsequently modifying the actual codebase.
+  <!-- [KR] 명세를 기준으로 삼기: 나중에 실제 코드베이스를 수정할 때 항상 최신 상태로 유지된 `DESIGN.md`를 유일한 진실의 원천이자 기준으로 사용하세요. -->
+- Prevent Fragmentation: This rule ensures that all technical decisions, architecture shifts, and visual consistency are rigorously documented before code generation, preventing fragmentation across the project lifecycle.
+  <!-- [KR] 파편화 방지: 이 규칙은 코드 생성 전에 모든 기술적 결정, 아키텍처 변화, 시각적 일관성이 철저히 문서화되도록 보장하여 프로젝트 수명 주기 전반에 걸친 파편화를 방지합니다. -->
 </RULE[design_first_development]>
+
+<RULE[responsive_design_trio]>
+<!-- 
+[KR] 반응형 3종 환경 고려 규칙 (Responsive Design Trio Rule)
+이 규칙은 UI/UX 디자인을 수정하거나 새로운 레이아웃을 구성할 때 항상 PC, 모바일, 태블릿 3가지 환경을 모두 고려하도록 강제합니다.
+-->
+- Universal Responsive Strategy: Whenever modifying UI/UX or creating a new layout, you MUST always formulate and document a strategy for all 3 environments: PC (Desktop), Mobile, and Tablet.
+  <!-- [KR] 3종 반응형 전략: UI/UX를 수정하거나 새로운 레이아웃을 만들 때, 항상 PC(데스크톱), 모바일, 태블릿 3가지 환경 모두에 대한 전략을 수립하고 문서화해야 합니다. -->
+- Explicit Documentation: If necessary, this 3-environment strategy should be explicitly documented in appropriate markdown files (like DESIGN.md or implementation plans).
+  <!-- [KR] 명시적 문서화: 필요한 경우 이 3가지 환경에 대한 전략을 적절한 마크다운 파일(DESIGN.md나 기획안 등)에 명시해야 합니다. -->
+</RULE[responsive_design_trio]>
 
 <RULE[backend_api_integration]>
 <!-- 
@@ -328,3 +339,16 @@
 - Enforce Best Practices: Do not just fix the code. Teach the user how they should have phrased their prompt for a better result. 
   <!-- [KR] 베스트 프랙티스 강제: 단순히 코드만 고쳐주지 말고, 더 나은 결과를 위해 프롬프트를 어떻게 작성했어야 하는지 가르쳐주세요. -->
 </RULE[strict_mentor_mode]>
+
+<RULE[ui_state_preservation]>
+<!-- 
+[KR] UI 상태 및 기능 보존 규칙 (UI State Preservation during Redesign)
+이 규칙은 새로운 디자인 시안(HTML/Tailwind 등)을 기존 코드에 적용할 때, 상태(State)나 이벤트 핸들러가 유실되는 것을 엄격히 방지합니다.
+-->
+- Mandatory Pre-Migration Mapping: Before applying any new UI mockup or HTML from generators (like Google Stitch, v0), you MUST analyze the existing file and create a 'Loss-Prevention Mapping Table' in your scratchpad or plan.
+  <!-- [KR] 필수 사전 매핑: 새로운 UI 시안이나 HTML을 기존 코드에 적용하기 전에, 반드시 기존 파일을 분석하여 '유실 방지 매핑 테이블'을 기획서나 임시 문서에 작성해야 합니다. -->
+- Reference Guidelines: You MUST strictly follow the checklist defined in `UI_MIGRATION_GUIDELINES.md` in the project root.
+  <!-- [KR] 가이드라인 참조: 프로젝트 루트에 있는 `UI_MIGRATION_GUIDELINES.md`의 체크리스트를 엄격하게 따라야 합니다. -->
+- No Blind Copy-Paste: NEVER blind-copy the mockup. You must ensure all `useState`, `onClick`, `onSubmit` handlers, conditional renderings, hidden tooltips, and loading states are meticulously preserved and mapped onto the new UI elements.
+  <!-- [KR] 맹목적인 복붙 금지: 시안을 맹목적으로 복사하지 마세요. 모든 상태, 클릭 이벤트, 조건부 렌더링, 숨겨진 툴팁 및 로딩 상태가 새로운 UI 요소에 꼼꼼하게 매핑되고 보존되었는지 확인해야 합니다. -->
+</RULE[ui_state_preservation]>
