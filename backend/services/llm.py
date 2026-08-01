@@ -5,8 +5,11 @@ import time
 import math
 from pydub import AudioSegment
 from google import genai
+from google.genai import types
 import openai
 from typing import List, Any
+from tenacity import retry, stop_after_attempt, wait_exponential
+from pydantic import BaseModel, Field
 
 def get_gemini_client():
     api_key = os.getenv("GEMINI_API_KEY")
@@ -275,8 +278,17 @@ def generate_outline(context_data: str, provider: str, url_hash: str, length_pre
     각 목차 항목은 번호나 기호 없이 새로운 줄에 제목만 하나씩 작성해줘. (예: 데이터베이스의 이해)
     """
     
-    if provider == "Google Gemini":
+    class OutlineSchema(BaseModel):
+        sections: List[str] = Field(description="목차 항목들의 리스트 (기호나 번호 없이 순수 제목만 포함)")
+
+    @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=30))
+    def _call_gemini_outline():
         client = get_gemini_client()
+        config = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=OutlineSchema,
+            temperature=0.2
+        )
         if context_data.startswith("GEMINI_FILE_URI::"):
             file_name = context_data.split("::")[1]
             uploaded_file = client.files.get(name=file_name)
@@ -286,27 +298,53 @@ def generate_outline(context_data: str, provider: str, url_hash: str, length_pre
             
         response = client.models.generate_content(
             model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
-            contents=contents_payload
+            contents=contents_payload,
+            config=config
         )
-        outline_raw = response.text
-    else:
-        target_model = provider
-        if provider == "OpenAI (GPT-4o)":
+        return response.text
+
+    @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=30))
+    def _call_openai_outline(target_provider="OpenAI (GPT-4o)"):
+        target_model = target_provider
+        if target_provider == "OpenAI (GPT-4o)":
             target_model = "gpt-4o"
-        elif provider == "cerebras/gpt-oss-120b":
+        elif target_provider == "cerebras/gpt-oss-120b":
             target_model = "gpt-oss-120b"
             
-        client = get_openai_client(provider)
+        client = get_openai_client(target_provider)
         response = client.chat.completions.create(
             model=target_model,
             messages=[
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": f"다음은 영상 스크립트 내용입니다:\n\n{context_data}"}
-            ]
+            ],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "outline_schema",
+                    "schema": OutlineSchema.model_json_schema()
+                }
+            }
         )
-        outline_raw = response.choices[0].message.content
+        return response.choices[0].message.content
+
+    if provider == "Google Gemini":
+        try:
+            outline_raw = _call_gemini_outline()
+        except Exception as e:
+            print(f"[Harness Fallback] Gemini failed outline generation: {e}. Switching to Fallback.")
+            outline_raw = _call_openai_outline("OpenAI (GPT-4o)")
+    else:
+        outline_raw = _call_openai_outline(provider)
         
-    for line in outline_raw.split("\n"):
+    try:
+        parsed_json = json.loads(outline_raw)
+        raw_sections = parsed_json.get("sections", [])
+    except Exception as e:
+        print(f"[Harness Error] Failed to parse structured output: {e}")
+        raw_sections = []
+        
+    for line in raw_sections:
         clean_line = line.strip().lstrip('1234567890.-*# ')
         if clean_line:
             sections.append(clean_line)
@@ -319,7 +357,7 @@ def generate_outline(context_data: str, provider: str, url_hash: str, length_pre
         
     return sections
 
-async def async_generate_chapter_content(section_title: str, context_data: str, provider: str, chunk_index: int, total_chunks: int, length_preset: str = "아주 상세하게", analogy_preset: str = "풍부한 비유", learner_profile: str = "", url_hash: str = "") -> str:
+async def async_generate_chapter_content(section_title: str, context_data: str, provider: str, chunk_index: int, total_chunks: int, length_preset: str = "아주 상세하게", analogy_preset: str = "풍부한 비유", learner_profile: str = "", url_hash: str = "", tutor_persona: dict = None) -> str:
     """
     전체 스크립트를 LLM에 전달하여 챕터 내용에 해당하는 부분을 스스로 찾아서 작성하도록 합니다. (정확도 우선)
     """
@@ -375,8 +413,26 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
         else:
             analogy_instruction = "어려운 기술 용어나 복잡한 개념이 등장할 때마다 일상적인 비유(요리, 식당, 교통 등)를 먼저 제시해라."
     
+        tutor_directive = ""
+        if tutor_persona:
+            tutor_role = tutor_persona.get("role", "전문 튜터")
+            tutor_tone = tutor_persona.get("tone", "친절하고 명확하게")
+            tutor_focus = tutor_persona.get("focus_areas", "핵심 내용 설명")
+            
+            tutor_directive = f"""
+            [AI 튜터 페르소나 (강제 적용)]
+            역할(Role): {tutor_role}
+            어조(Tone): {tutor_tone}
+            집중 영역(Focus Areas): {tutor_focus}
+            
+            지시사항: 당신은 단순한 AI가 아니라 위의 '역할(Role)'을 수행하는 전문가입니다. 본문 전체의 문체와 내용 전개를 이 '어조(Tone)'와 '집중 영역'에 완벽히 맞추십시오.
+            """
+        else:
+            tutor_directive = "당신은 영상 내용을 기반으로 학습 가이드를 작성하는 튜터입니다."
+
         system_prompt = f"""
-        당신은 영상 내용을 기반으로 학습 가이드를 작성하는 튜터입니다.
+        {tutor_directive}
+        
         제공된 [전체 스크립트]를 문맥적으로 분석하여, 다음 챕터 제목(또는 주제)에 해당하는 내용을 찾아 챕터 본문을 작성해줘.
         챕터 제목은 스크립트의 특정 부분을 요약한 것이므로, 정확히 같은 단어가 없더라도 의미상 관련된 내용을 찾아야 해.
         단, 전체 스크립트를 아무리 살펴봐도 해당 주제와 관련된 내용이 아예 존재하지 않을 때만 예외적으로 "해당 내용을 영상에서 찾을 수 없습니다."라고 출력해.
@@ -384,14 +440,15 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
         챕터 제목: {section_title}
         
         <PERSONA_DIRECTIVE>
-        당신은 무미건조한 AI가 아닙니다. 아래의 [학습자 프로필]에 100% 빙의하여 맞춤형 튜터로 행동하십시오.
+        당신은 무미건조한 AI가 아닙니다. 위에서 부여된 [AI 튜터 페르소나]와 아래의 [학습자 프로필]을 결합하여 완벽한 맞춤형 지도를 수행하십시오.
         
         [학습자 프로필]
         {learner_profile if learner_profile else "일반적인 성인 학습자"}
         
-        1. 어조 강제: 학습자 프로필에 명시된 '원하는 튜터 어조'를 본문 전체에 걸쳐 철저하게 유지하십시오.
+        1. 어조 강제: 튜터 페르소나의 '어조'와 학습자 프로필의 '원하는 튜터 어조'를 조화롭게 섞어 본문 전체에 걸쳐 철저하게 유지하십시오.
         2. 비유 강제: 어려운 개념을 설명할 때는 반드시 프로필에 명시된 '주요 관심사'와 관련된 메타포(비유)를 하나 이상 들어 설명하십시오. 
         3. 눈높이 강제: '학습 목표'와 '연령대/직업'에 맞추어 전문 용어의 사용 수준과 설명의 깊이를 조절하십시오.
+        4. 표현 현지화 강제: '24/7', 'ASAP' 등 영어식 표현이나 약어는 원문을 그대로 쓰지 말고 문맥에 맞게 자연스러운 한국어(예: '일주일 24시간 내내', '연중무휴' 등)로 번역하여 사용하십시오.
         </PERSONA_DIRECTIVE>
         
         프롬프트 가이드라인:
@@ -420,72 +477,71 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
     
     loop = asyncio.get_event_loop()
     
-    def _call_api():
-        max_retries = 5
-        base_delay = 5
-        
-        for attempt in range(max_retries):
+    @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=30))
+    def _call_gemini_with_retry():
+        client = get_gemini_client()
+        if chunked_context.startswith("GEMINI_FILE_URI::"):
+            file_name = chunked_context.split("::")[1]
+            model_id = os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite")
+            
             try:
-                if provider == "Google Gemini":
-                    client = get_gemini_client()
-                    if chunked_context.startswith("GEMINI_FILE_URI::"):
-                        file_name = chunked_context.split("::")[1]
-                        model_id = os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite")
-                        
-                        try:
-                            # Context Caching 적용 (Option B)
-                            cache_name = get_or_create_document_cache(file_name, model_id)
-                            from google.genai import types
-                            response = client.models.generate_content(
-                                model=model_id,
-                                contents=[system_prompt], # System prompt is passed per chapter
-                                config=types.GenerateContentConfig(
-                                    cached_content=cache_name
-                                )
-                            )
-                            return response.text
-                        except Exception as cache_e:
-                            print(f"[Gemini Cache] Failed to use explicit cache: {cache_e}. Falling back to normal upload.")
-                            uploaded_file = client.files.get(name=file_name)
-                            contents_payload = [uploaded_file, system_prompt]
-                            response = client.models.generate_content(
-                                model=model_id,
-                                contents=contents_payload
-                            )
-                            return response.text
-                    else:
-                        contents_payload = [chunked_context, system_prompt]
-                        
-                        response = client.models.generate_content(
-                            model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
-                            contents=contents_payload
-                        )
-                        return response.text
-                else:
-                    target_model = provider
-                    if provider == "OpenAI (GPT-4o)":
-                        target_model = "gpt-4o"
-                    elif provider == "cerebras/gpt-oss-120b":
-                        target_model = "gpt-oss-120b"
-                        
-                    client = get_openai_client(provider)
-                    response = client.chat.completions.create(
-                        model=target_model,
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": f"다음은 분석할 원본 영상 전체 스크립트입니다:\n\n{chunked_context}"}
-                        ]
+                # Context Caching 적용 (Option B)
+                cache_name = get_or_create_document_cache(file_name, model_id)
+                from google.genai import types
+                response = client.models.generate_content(
+                    model=model_id,
+                    contents=[system_prompt], # System prompt is passed per chapter
+                    config=types.GenerateContentConfig(
+                        cached_content=cache_name
                     )
-                    return response.choices[0].message.content
+                )
+                return response.text
+            except Exception as cache_e:
+                print(f"[Gemini Cache] Failed to use explicit cache: {cache_e}. Falling back to normal upload.")
+                uploaded_file = client.files.get(name=file_name)
+                contents_payload = [uploaded_file, system_prompt]
+                response = client.models.generate_content(
+                    model=model_id,
+                    contents=contents_payload
+                )
+                return response.text
+        else:
+            contents_payload = [chunked_context, system_prompt]
+            
+            response = client.models.generate_content(
+                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
+                contents=contents_payload
+            )
+            return response.text
+
+    @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=30))
+    def _call_openai_with_retry(target_provider="OpenAI (GPT-4o)"):
+        target_model = target_provider
+        if target_provider == "OpenAI (GPT-4o)":
+            target_model = "gpt-4o"
+        elif target_provider == "cerebras/gpt-oss-120b":
+            target_model = "gpt-oss-120b"
+            
+        client = get_openai_client(target_provider)
+        response = client.chat.completions.create(
+            model=target_model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"다음은 분석할 원본 영상 전체 스크립트입니다:\n\n{chunked_context}"}
+            ]
+        )
+        return response.choices[0].message.content
+
+    def _call_api():
+        if provider == "Google Gemini":
+            try:
+                return _call_gemini_with_retry()
             except Exception as e:
-                if attempt < max_retries - 1:
-                    delay = base_delay * (2 ** attempt)
-                    import time
-                    print(f"API Error ({e}). Retrying in {delay} seconds... (Attempt {attempt+1}/{max_retries})")
-                    time.sleep(delay)
-                else:
-                    print(f"API Error ({e}). Max retries reached.")
-                    raise e
+                print(f"[Harness Fallback] Gemini failed after retries: {e}. Switching to Fallback model (GPT-4o).")
+                # Fallback to GPT-4o
+                return _call_openai_with_retry("OpenAI (GPT-4o)")
+        else:
+            return _call_openai_with_retry(provider)
 
     result = await loop.run_in_executor(None, _call_api)
     
@@ -646,7 +702,12 @@ def profile_content(context_data: str, provider: str) -> dict:
     {{
         "length_preset": "핵심 요약" | "적당한 설명" | "아주 상세하게",
         "analogy_preset": "비유 없이 담백하게" | "적절한 비유 추가" | "풍부한 비유",
-        "profile_message": "A short, friendly Korean message explaining your decision (e.g., '💡 AI가 전문적인 IT 강의로 인식하여 비유 없이 상세하게 정리합니다.')"
+        "profile_message": "A short, friendly Korean message explaining your decision (e.g., '💡 AI가 전문적인 IT 강의로 인식하여 비유 없이 상세하게 정리합니다.')",
+        "tutor_persona": {{
+            "role": "The specific role the AI should take (e.g., '문학 평론가', 'IT 시니어 개발자', '열정적인 동기부여 강사', '중립적인 토론 진행자')",
+            "tone": "The tone of voice (e.g., '전문적이고 냉철하게', '친절하고 비유를 섞어서', '학술적이고 객관적으로')",
+            "focus_areas": "What to focus on based on content type (e.g., '핵심 쟁점과 논거 분석', '실무 적용 가능한 코드 스니펫', '저자의 의도와 문맥 해석')"
+        }}
     }}
 
     Transcript Sample:

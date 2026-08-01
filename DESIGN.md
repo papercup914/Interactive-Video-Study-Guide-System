@@ -85,3 +85,10 @@ Supports three processing options depending on user needs:
 - Exposes the local Next.js frontend to the public internet using **Cloudflare Quick Tunnels** (`cloudflared`).
 - Bypasses Next.js dev server WebSocket/HMR limitations by running in strictly **Production Mode** (`npm run build && npm run start`).
 <!-- [KR] Cloudflare Quick Tunnels를 통해 로컬 서버를 외부 인터넷에 노출하며, HMR 웹소켓 에러 방지를 위해 반드시 프로덕션 모드로 빌드 및 실행합니다. -->
+
+## 6. Business & Deployment Strategy (v1.0)
+<!-- [KR] 6. 비즈니스 및 배포 전략 (v1.0) -->
+- **BYOK (Bring Your Own Key) Model**: To eliminate recurring server costs and avoid operational overhead (e.g., handling subscriptions, fighting abusers), v1.0 completely drops central cloud databases. Users must input their own Gemini/OpenAI API key to generate content.
+  <!-- [KR] BYOK 모델: 반복적인 서버 유지비를 없애고 운영 스트레스를 피하기 위해, v1.0에서는 중앙 클라우드 DB 연동(커뮤니티 공유 기능)을 과감히 포기합니다. 유저는 반드시 본인의 API 키를 입력하여 콘텐츠를 생성해야 합니다. -->
+- **Zero-Backend Standalone**: The system runs purely as a local installation or standalone web app. All study guides are saved locally in the user's environment. This ensures 100% data privacy and 0 ongoing API costs for the developer.
+  <!-- [KR] 완벽한 무서버 스탠드얼론: 앱은 100% 로컬 설치형 또는 스탠드얼론 웹앱으로 동작하며, 모든 학습서는 유저 환경에 저장됩니다. 이를 통해 유저의 프라이버시를 보호하고 개발자의 유지비용을 0원으로 만듭니다. -->

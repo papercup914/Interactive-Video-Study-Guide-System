@@ -13,3 +13,4 @@ youtube-transcript-api
 requests
 chromadb
 google-genai
+tenacity

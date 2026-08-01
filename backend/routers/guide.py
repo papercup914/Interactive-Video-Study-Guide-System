@@ -120,22 +120,25 @@ async def _generate_guide_task(job_id: str, request: GuideRequest, file_path: st
             url_hash = hashlib.md5(request.url.encode()).hexdigest()
             is_document = True
             
+        tutor_persona = None
         if is_document:
             request.length_preset = "문서 원본 번역"
         else:
-            if request.length_preset == "Auto" or request.analogy_preset == "Auto":
-                update_job_status(job_id, "analyzing_context", "AI가 영상 성격을 분석하여 최적의 톤과 분량을 계산 중...")
-                from backend.services.llm import profile_content
-                profile_result = await loop.run_in_executor(None, profile_content, transcript, request.provider)
-                
-                if request.length_preset == "Auto":
-                    request.length_preset = profile_result.get("length_preset", "적당한 설명")
-                if request.analogy_preset == "Auto":
-                    request.analogy_preset = profile_result.get("analogy_preset", "적절한 비유 추가")
-                
-                job = get_job(job_id)
-                if job:
-                    job["profile_message"] = profile_result.get("profile_message", "")
+            # Always run profiling for videos to get dynamic tutor_persona
+            update_job_status(job_id, "analyzing_context", "AI가 영상 성격을 분석하여 최적의 톤과 페르소나를 계산 중...")
+            from backend.services.llm import profile_content
+            profile_result = await loop.run_in_executor(None, profile_content, transcript, request.provider)
+            
+            if request.length_preset == "Auto":
+                request.length_preset = profile_result.get("length_preset", "적당한 설명")
+            if request.analogy_preset == "Auto":
+                request.analogy_preset = profile_result.get("analogy_preset", "적절한 비유 추가")
+            
+            tutor_persona = profile_result.get("tutor_persona")
+            job = get_job(job_id)
+            if job:
+                job["profile_message"] = profile_result.get("profile_message", "")
+                job["tutor_persona"] = tutor_persona
             
         if not is_document:
             update_job_status(job_id, "mapping_reduce", "원본 영상 분석 및 병렬 마스터 요약 생성 중...")
@@ -149,6 +152,10 @@ async def _generate_guide_task(job_id: str, request: GuideRequest, file_path: st
         document = {}
         total_sections = len(sections)
         
+        # Load completed chapters from DB (Checkpointing Harness)
+        from backend.services.job_manager import get_completed_chapters, save_chapter_checkpoint
+        completed_chapters = get_completed_chapters(job_id)
+        
         # Concurrency limit setup based on job size to prevent Rate Limits
         # Map-Reduce 도입으로 컨텍스트가 가벼워졌으므로 동시성을 10개로 대폭 상향
         concurrency_limit = 10
@@ -159,13 +166,23 @@ async def _generate_guide_task(job_id: str, request: GuideRequest, file_path: st
                 job = get_job(job_id)
                 if job and job.get("status") == "cancelled":
                     return
+                
+                # Check if this chapter is already generated and cached
+                if section_title in completed_chapters:
+                    print(f"[Harness] Checkpoint loaded for {section_title}, skipping API call.")
+                    document[section_title] = completed_chapters[section_title]
+                    return
+
                 update_job_status(job_id, "generating_chapters", f"[{idx+1}/{total_sections}] 챕터 생성 중...")
                 content = await async_generate_chapter_content(
                     section_title, master_summary, request.provider, idx, total_sections, 
-                    request.length_preset, request.analogy_preset, request.learner_profile, url_hash
+                    request.length_preset, request.analogy_preset, request.learner_profile, url_hash,
+                    tutor_persona
                 )
                 if content:
                     document[section_title] = content
+                    # Save checkpoint immediately
+                    save_chapter_checkpoint(job_id, section_title, content)
                 
         # Run all sections concurrently with limit
         tasks = [process_section(i, section) for i, section in enumerate(sections)]
@@ -257,21 +274,23 @@ async def check_job_status(job_id: str):
 
 @router.get("/result/{job_id}")
 async def get_job_result(job_id: str):
+    # First check history as it contains the most up-to-date notes
+    history = _load_history()
+    for entry in history:
+        if entry["id"] == job_id:
+            return {
+                "job_id": job_id, 
+                "document": entry["document"], 
+                "notes": entry.get("notes", []),
+                "title": entry.get("title", "AI 맞춤형 학습 가이드"),
+                "image_url": entry.get("image_url", "https://images.unsplash.com/photo-1517842645767-c639042777db?q=80&w=800&auto=format&fit=crop"),
+                "url": entry.get("url", ""),
+                "profile_message": entry.get("profile_message", "")
+            }
+            
+    # If not in history, check active jobs
     job = get_job(job_id)
     if not job:
-        # Check if it's in history instead
-        history = _load_history()
-        for entry in history:
-            if entry["id"] == job_id:
-                return {
-                    "job_id": job_id, 
-                    "document": entry["document"], 
-                    "notes": entry.get("notes", []),
-                    "title": entry.get("title", "AI 맞춤형 학습 가이드"),
-                    "image_url": entry.get("image_url", "https://images.unsplash.com/photo-1517842645767-c639042777db?q=80&w=800&auto=format&fit=crop"),
-                    "url": entry.get("url", ""),
-                    "profile_message": entry.get("profile_message", "")
-                }
         raise HTTPException(status_code=404, detail="Job not found")
         
     if job["status"] != "completed":

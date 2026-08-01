@@ -27,6 +27,15 @@ def _init_db():
             created_at TEXT
         )
     ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS job_checkpoints (
+            job_id TEXT,
+            section_title TEXT,
+            content TEXT,
+            created_at TEXT,
+            PRIMARY KEY (job_id, section_title)
+        )
+    ''')
     conn.commit()
     conn.close()
 
@@ -93,3 +102,20 @@ def cancel_job(job_id: str) -> None:
     conn.execute("UPDATE jobs SET status = ?, progress = ? WHERE id = ?", ("cancelled", "작업이 중단되었습니다.", job_id))
     conn.commit()
     conn.close()
+
+def save_chapter_checkpoint(job_id: str, section_title: str, content: str) -> None:
+    conn = _get_conn()
+    created_at = datetime.now().isoformat()
+    conn.execute(
+        "INSERT OR REPLACE INTO job_checkpoints (job_id, section_title, content, created_at) VALUES (?, ?, ?, ?)",
+        (job_id, section_title, content, created_at)
+    )
+    conn.commit()
+    conn.close()
+
+def get_completed_chapters(job_id: str) -> Dict[str, str]:
+    conn = _get_conn()
+    rows = conn.execute("SELECT section_title, content FROM job_checkpoints WHERE job_id = ?", (job_id,)).fetchall()
+    conn.close()
+    return {row["section_title"]: row["content"] for row in rows}
+
