@@ -340,6 +340,19 @@
   <!-- [KR] 베스트 프랙티스 강제: 단순히 코드만 고쳐주지 말고, 더 나은 결과를 위해 프롬프트를 어떻게 작성했어야 하는지 가르쳐주세요. -->
 </RULE[strict_mentor_mode]>
 
+<RULE[gstack_ideation_subagents]>
+<!-- 
+[KR] gstack 기반 아이데이션 서브 에이전트 라우팅 규칙
+이 규칙은 gstack 폴더에서 추출된 3개의 기획/아이데이션 특화 서브 에이전트를 정의합니다.
+사용자가 브레인스토밍, 기획 리뷰, 또는 디자인 시스템 제안을 요구할 때, 메인 에이전트는 직접 코딩하거나 대답하는 대신 이 서브 에이전트들을 호출(invoke_subagent)해야 합니다.
+-->
+- Agent Definitions: When requested, you can define and invoke the following subagents using the `define_subagent` tool:
+  1. `office_hours_agent`: A YC Office Hours Partner. Use for brainstorming, challenging the problem space, finding the narrowest wedge, and pushing for desperate specificity. (Prompt source: `.agents/gstack_prompts/office_hours_agent.md`)
+  2. `ceo_review_agent`: A CEO/Founder-Mode Plan Reviewer. Use when the user has a plan or architecture and needs it rigorously reviewed for failure modes, edge cases, and scope calibration (Zero silent failures). (Prompt source: `.agents/gstack_prompts/ceo_review_agent.md`)
+  3. `design_consultation_agent`: A Senior Product Designer. Use when the user needs a complete visual design system, aesthetic direction, or UI/UX first-principles thinking. (Prompt source: `.agents/gstack_prompts/design_consultation_agent.md`)
+- Routing Mandatory: If the user asks for design system ideas, a plan review, or product brainstorming, DO NOT just answer as the technical engineer. Instead, read the corresponding prompt file in `.agents/gstack_prompts/` and pass its content as the `system_prompt` when defining the subagent, then invoke the subagent to handle the ideation.
+</RULE[gstack_ideation_subagents]>
+
 <RULE[ui_state_preservation]>
 <!-- 
 [KR] UI 상태 및 기능 보존 규칙 (UI State Preservation during Redesign)
