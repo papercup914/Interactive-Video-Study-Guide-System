@@ -10,7 +10,6 @@ google-genai
 youtube-transcript-api
 requests
 httpx
-chromadb
 tenacity
 pyjwt[crypto]
 python-jose[cryptography]
