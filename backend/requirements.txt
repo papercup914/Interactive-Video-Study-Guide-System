@@ -5,7 +5,6 @@ pydantic
 pypdf
 pillow
 beautifulsoup4
-google-generativeai
 google-genai
 youtube-transcript-api
 yt-dlp
