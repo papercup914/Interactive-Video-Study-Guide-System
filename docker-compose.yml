@@ -24,9 +24,6 @@ services:
   # 2. FastAPI Backend API Server
   # ----------------------------------------------------------------------------
   fastapi:
-    build:
-      context: .
-      dockerfile: Dockerfile.backend
     image: studyguide-backend:latest
     container_name: studyguide-fastapi
     restart: unless-stopped
@@ -50,9 +47,7 @@ services:
   # 3. Celery Async Task Worker
   # ----------------------------------------------------------------------------
   celery_worker:
-    build:
-      context: .
-      dockerfile: Dockerfile.backend
+    image: studyguide-backend:latest
     container_name: studyguide-celery
     restart: unless-stopped
     env_file:

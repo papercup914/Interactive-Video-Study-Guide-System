@@ -20,8 +20,11 @@ if [ ! -f "backend/.env" ]; then
     exit 1
 fi
 
-echo "🐳 Building and starting containers (FastAPI + Celery + Redis)..."
-docker compose up -d --build --remove-orphans
+echo "🐳 Building single backend Docker image (lightweight)..."
+docker build -t studyguide-backend:latest -f Dockerfile.backend .
+
+echo "🚀 Starting containers (FastAPI + Celery + Redis)..."
+docker compose up -d --remove-orphans
 
 echo "⏳ Waiting for backend services to stabilize (5 seconds)..."
 sleep 5
