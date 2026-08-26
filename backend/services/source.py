@@ -56,43 +56,38 @@ def extract_text_from_web(url: str):
         return text, title
 
 
-def extract_text_from_pdf(file_path: str):
+def extract_text_from_pdf(file_path: str) -> str:
     """
-    Fast PDF text extraction using PyMuPDF.
+    Fast and lightweight PDF text extraction using pure-python pypdf.
     """
-    import fitz  # PyMuPDF
-    
+    if not file_path or not os.path.exists(file_path):
+        raise ValueError(f"유효하지 않은 PDF 파일 경로입니다: {file_path}")
+        
     try:
-        print(f"Reading {file_path} with PyMuPDF (Fast Mode)...")
-        doc = fitz.open(file_path)
+        from pypdf import PdfReader
+        print(f"Reading {file_path} with pypdf (Lightweight Mode)...")
+        reader = PdfReader(file_path)
         
         full_text = []
-        for page_num in range(len(doc)):
-            page = doc.load_page(page_num)
-            text = page.get_text("text")
-            full_text.append(text.strip())
+        for i, page in enumerate(reader.pages):
+            page_text = page.extract_text()
+            if page_text and page_text.strip():
+                full_text.append(page_text.strip())
+                
+        if not full_text:
+            raise ValueError("PDF 파일에서 텍스트를 추출할 수 없습니다 (스캔 이미지 PDF일 수 있습니다).")
             
-        doc.close()
-        
-        final_text = "\n\n---\n\n".join(full_text)
-        return final_text
+        return "\n\n---\n\n".join(full_text)
         
     except Exception as e:
         print(f"PDF 추출 실패: {str(e)}")
         raise Exception(f"PDF 로컬 파싱 실패: {str(e)}")
 
-def extract_text_with_pymupdf4llm(file_path: str):
+def extract_text_with_pymupdf4llm(file_path: str) -> str:
     """
-    Extract text as Markdown using pymupdf4llm (Option B).
+    Fallback markdown extraction using pypdf.
     """
-    import pymupdf4llm
-    try:
-        print(f"Reading {file_path} with pymupdf4llm (Option B)...")
-        md_text = pymupdf4llm.to_markdown(file_path)
-        return md_text
-    except Exception as e:
-        print(f"pymupdf4llm 추출 실패: {str(e)}")
-        raise Exception(f"pymupdf4llm 로컬 파싱 실패: {str(e)}")
+    return extract_text_from_pdf(file_path)
 
 def upload_pdf_to_gemini(file_path: str):
     """
