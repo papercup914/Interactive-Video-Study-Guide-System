@@ -16,3 +16,4 @@ python-jose[cryptography]
 cryptography
 celery
 redis
+sqlalchemy

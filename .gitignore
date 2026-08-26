@@ -16,7 +16,9 @@ __pycache__/
 *$py.class
 
 # Application Data & Cache
-backend/data/
+backend/data/*
+!backend/data/*.py
+backend/data/cache_chapters/
 backend/tmp/
 tmp/
 *.sqlite3
