@@ -39,38 +39,59 @@ def process_audio(audio_path: str, provider: str) -> str:
     """
     선택된 Provider에 맞게 오디오를 처리하여 텍스트 대본(Transcript)을 반환합니다.
     로컬에 이미 캐시된 대본이 있으면 API를 호출하지 않고 캐시를 반환합니다.
+    OpenAI Whisper 실패 시 Gemini 멀티모달 오디오 변환으로 자동 Fallback합니다.
     """
+    if not audio_path or not os.path.exists(audio_path):
+        raise ValueError(f"오디오 파일이 존재하지 않거나 잘못된 경로입니다: {audio_path}")
+
     url_hash = os.path.splitext(os.path.basename(audio_path))[0]
     data_dir = "data"
     if not os.path.exists(data_dir):
-        os.makedirs(data_dir)
+        os.makedirs(data_dir, exist_ok=True)
         
     cache_file = os.path.join(data_dir, f"{url_hash}_transcript.txt")
     if os.path.exists(cache_file):
         with open(cache_file, "r", encoding="utf-8") as f:
-            return f.read()
+            cached_text = f.read()
+            if cached_text and cached_text.strip():
+                return cached_text
 
     transcript = ""
+    whisper_done = False
+
     # OpenAI 계열 (Whisper) 우선 시도
     openai_key = os.getenv("OPENAI_API_KEY")
     if openai_key and openai_key != "여기에_OPENAI_API_키를_입력하세요" and provider != "Google Gemini":
-        client = get_openai_client("OpenAI (GPT-4o)")
-        with open(audio_path, "rb") as audio_file:
-            transcript_response = client.audio.transcriptions.create(
-                model="whisper-1", 
-                file=audio_file, 
-                response_format="text"
-            )
-        transcript = transcript_response
-    else:
+        try:
+            client = get_openai_client("OpenAI (GPT-4o)")
+            with open(audio_path, "rb") as audio_file:
+                transcript_response = client.audio.transcriptions.create(
+                    model="whisper-1", 
+                    file=audio_file, 
+                    response_format="text"
+                )
+            if transcript_response and str(transcript_response).strip():
+                transcript = str(transcript_response).strip()
+                whisper_done = True
+        except Exception as e:
+            print(f"[Warning] OpenAI Whisper 변환 실패 ({e}). Gemini 멀티모달 오디오 변환으로 자동 Fallback합니다.")
+
+    if not whisper_done:
         # Gemini 멀티모달 오디오 분석
-        client = get_gemini_client()
-        uploaded_file = client.files.upload(file=audio_path)
-        response = client.models.generate_content(
-            model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
-            contents=[uploaded_file, "Please provide a complete and highly accurate transcription of this audio in its original language. Do not summarize, format, or skip any parts. Return ONLY the transcribed text."]
-        )
-        transcript = response.text
+        try:
+            client = get_gemini_client()
+            uploaded_file = client.files.upload(file=audio_path)
+            response = client.models.generate_content(
+                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
+                contents=[uploaded_file, "Please provide a complete and highly accurate transcription of this audio in its original language. Do not summarize, format, or skip any parts. Return ONLY the transcribed text."]
+            )
+            if response and response.text:
+                transcript = response.text
+            else:
+                raise Exception("Gemini 오디오 변환 결과 텍스트가 비어있습니다.")
+        except Exception as e:
+            print(f"Gemini API error during audio processing: {e}")
+            raise Exception(f"오디오 변환(Whisper 및 Gemini Fallback) 처리에 실패했습니다: {e}")
 
     with open(cache_file, "w", encoding="utf-8") as f:
         f.write(transcript)

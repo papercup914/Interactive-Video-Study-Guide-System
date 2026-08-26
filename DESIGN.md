@@ -92,3 +92,132 @@ Supports three processing options depending on user needs:
   <!-- [KR] BYOK 모델: 반복적인 서버 유지비를 없애고 운영 스트레스를 피하기 위해, v1.0에서는 중앙 클라우드 DB 연동(커뮤니티 공유 기능)을 과감히 포기합니다. 유저는 반드시 본인의 API 키를 입력하여 콘텐츠를 생성해야 합니다. -->
 - **Zero-Backend Standalone**: The system runs purely as a local installation or standalone web app. All study guides are saved locally in the user's environment. This ensures 100% data privacy and 0 ongoing API costs for the developer.
   <!-- [KR] 완벽한 무서버 스탠드얼론: 앱은 100% 로컬 설치형 또는 스탠드얼론 웹앱으로 동작하며, 모든 학습서는 유저 환경에 저장됩니다. 이를 통해 유저의 프라이버시를 보호하고 개발자의 유지비용을 0원으로 만듭니다. -->
+
+## 7. Personalization & Learning Methodologies (Ideation)
+<!-- [KR] 7. 개인화 및 학습 방법론 (아이디에이션) -->
+
+### 7.1 Problem Statement
+- **Current State**: Most AI study guides are static, one-size-fits-all summaries. Users passively consume them, which leads to the "illusion of competence" (feeling like you know it because you read it).
+- **The Goal**: Transform the study guide from a static document into an adaptive, interactive learning environment that forces active recall and proves true comprehension.
+
+### 7.2 Explored Alternatives & Wild Ideas
+1. **Reverse Feynman Simulator (역-파인만 시뮬레이터)**:
+   - *Concept*: Instead of the AI explaining things to the user, the user must explain the core concepts *back* to the AI. The AI takes on a persona (e.g., a curious 10-year-old or a skeptical beginner).
+   - *Mechanic*: If the user uses too much jargon or fails to connect concepts, the AI interrupts and says, "I don't get it, what does [Jargon] mean?"
+2. **Dynamic Complexity Slider (동적 난이도 슬라이더)**:
+   - *Concept*: A real-time UI toggle (like a volume knob) that adjusts the entire document's language and depth from 'ELI5 (Explain Like I'm 5)' up to 'Post-Doc/Academic'.
+3. **The "Devil's Advocate" Mode (악마의 대변인 모드)**:
+   - *Concept*: The AI identifies the most counter-intuitive point in the video/document and actively debates the user on it, forcing the user to defend the concept to prove they understand it.
+4. **Spaced Repetition "Ambush" (간격 반복 기습)**:
+   - *Concept*: As the user scrolls or returns to the app later, previously learned concepts are hidden or turned into mini-challenges before they can proceed.
+
+### 7.3 Premise Challenge
+- **The Tension**: Do users actually *want* the friction of deep learning, or do they just want a quick summary to save time? 
+- **The Pivot**: How do we balance "fast, effortless consumption" (the hook) with "deep, challenging learning" (the value)? Could we separate these into two distinct modes: "Skim Mode" and "Feynman Mode"?
+
+### 7.4 Market Precedents & Limitations (Not a Silver Bullet)
+<!-- [KR] 7.4 시장 사례 및 한계점 (은탄환이 아닌 이유) -->
+While the Reverse Feynman technique (explaining to AI) is powerful, it is not a silver bullet for personalization.
+
+**Real-World Precedents (벤치마크 사례)**:
+1. **Khanmigo (Khan Academy)**: Uses a strict Socratic tutor model. It explicitly refuses to give students the answer, forcing them to explain their reasoning step-by-step. 
+   - *Result*: Educators love it because it prevents cheating. Students often find it frustrating when they are genuinely stuck.
+2. **Q-Chat (Quizlet)**: Uses an AI tutor to test users via the Socratic method. It asks probing questions based on flashcards.
+   - *Result*: Good for micro-learning, but user engagement drops if the session goes on too long due to high cognitive drain.
+3. **Rubber Duck Debugging (Devs & ChatGPT)**: Developers instinctively use LLMs as a "rubber duck," explaining their broken code to the AI. The act of explaining often solves the problem before the AI even answers.
+
+**Core Limitations (한계점 및 리스크)**:
+1. **Extreme Cognitive Load (높은 인지적 마찰)**: Explaining concepts is exhausting. If users are forced to use Feynman mode for an entire 1-hour video, they will churn. It must be used *surgically* (only on core concepts).
+2. **The Cold Start Problem (콜드 스타트 문제)**: If a user completely fails to understand the material, asking them to explain it will cause them to "rage-quit." Feynman mode requires a baseline level of comprehension. If they know 0%, they need a standard explanation, not a Socratic interrogation.
+3. **Evaluation Ambiguity (평가의 모호성)**: AI can sometimes falsely reject a good explanation because it lacks specific keywords, or hallucinate and accept a fundamentally flawed explanation just because it sounds confident.
+
+### 7.5 The "Frustration-Free" Feynman Implementation (Safety Nets)
+<!-- [KR] 7.5 좌절감 없는 파인만 학습법 구현 (안전망) -->
+The system explicitly rejects the "rigid wall" of traditional education and strict Socratic tutors (like Khanmigo). The Reverse Feynman mode must include built-in, frictionless safety nets to prevent learner frustration.
+
+**Proposed Mechanisms (제안 메커니즘)**:
+1. **"Yes, And..." Validation (긍정적 우회 교정)**: The AI never outright rejects the user's explanation. If the user is wrong, the AI validates their logic first ("Ah, that makes sense why you'd think that! That's true for X...") and gently guides them to the correct context ("...but what if we look at it from Y's perspective?").
+2. **Scaffolded Explanations (반자동 완성형 설명)**: Instead of a blank prompt, the AI starts the sentence and the user finishes it. (e.g., AI: "So to explain it simply, gravity is like a trampoline because..." -> User: "...heavy things bend the fabric.")
+3. **The "Tag Team" Mode (협력적 릴레이 설명)**: The AI and the user take turns explaining a concept to a virtual 3rd party. This reduces the burden on the user by splitting the cognitive load 50/50.
+4. **Frictionless Escape Hatch (즉각적인 항복 버튼)**: A clearly visible "I'm stuck, explain it to me" button that instantly drops the Feynman challenge and provides a clear, empathetic ELI5 explanation without any penalization.
+
+## 8. Adaptive Cognitive Routing (지능형 학습 라우팅)
+<!-- [KR] 8. 적응형 인지 라우팅 체계 -->
+
+### 8.1 The Need for an AI Content Classifier
+The Feynman Technique is optimal for **Conceptual Understanding** (e.g., "Why does inflation happen?"). However, it fails completely for other cognitive domains. The system needs an `AI Content Classifier` during the initial processing phase to tag the content type and route the user to the correct UI/UX learning mode.
+
+### 8.2 Non-Feynman Domains & Optimal Methods
+1. **Math & Algorithm Proofs (Strict Logic)**
+   - *Type*: Sequential, deterministic logic.
+   - *Optimal Mode*: **Interactive Step-Tracer**. The system hides the outcome of a formula/code block and asks the user to predict the *next state* (e.g., "What is the value of `i` after this loop?").
+2. **Simple Memorization (Facts, Dates, Vocab)**
+   - *Type*: Rote data without deep causal links.
+   - *Optimal Mode*: **Bizarre Mnemonic Generator & SRS**. The AI generates absurd, highly personalized memory hooks (e.g., linking a historical date to the user's favorite movie) combined with rapid-fire flashcards.
+3. **Procedural & Visual Tasks (How-to, Software, Physical Skills)**
+   - *Type*: Action-oriented steps.
+   - *Optimal Mode*: **Blind Navigation Checklists**. The AI converts the tutorial into a strict checklist. To prove mastery, the user must recount the physical steps without looking (e.g., "First, I click the top-right gear icon...").
+
+### 8.3 The Dynamic UI Implementation
+As the LLM processes the video transcript, it embeds metadata tags (`<type:concept>`, `<type:logic>`, `<type:memory>`, `<type:procedure>`) into each chapter. The frontend dynamically swaps the interactive component based on these tags, creating a polymorphic study guide.
+
+### 7.6 Failure Modes & Boundaries (Negative Space)
+<!-- [KR] 7.6 실패 모드 및 적용 불가 영역 (바운더리) -->
+The "Frustration-Free Feynman" mode is heavily guarded against contexts where it would degrade the user experience.
+
+**Where it MUST NOT be used (적용 금지 영역)**:
+1. **Strict Math/Algorithms (수학 및 알고리즘 증명)**: Precision is required. A "Yes, And..." approach to an incorrect time complexity or math formula is an educational failure.
+2. **Factoids/Rote Memorization (단순 암기 및 연도/사실)**: Binary knowledge cannot be "explained." Use standard spaced-repetition flashcards instead.
+3. **Procedural/Spatial Visuals (시각적/절차적 작업)**: Explaining how to tie a knot or use a 3D UI via text is agonizing.
+
+**Architectural Guardrails (시스템 안전장치)**:
+1. **The Two-Strike Rule (투 스트라이크 아웃)**: To prevent an infinite loop of patronizing AI hints ("Yes, And..." Purgatory), the frontend hardcodes a state machine. After 2 failed attempts by the user, the UI automatically triggers the Escape Hatch and reveals the answer.
+2. **Gibberish Bypass Prevention**: The client-side must block low-entropy inputs (e.g., "asdf") from wasting API calls, prompting the user to either try genuinely or use the SOS button.
+3. **Volatile State Protection**: If the user navigates to another tab (e.g., Transcript) to peek at the answer mid-typing, their drafted text MUST be cached (`localStorage`/Zustand) and restored upon return.
+
+## 9. System Observability & Logging Architecture
+<!-- [KR] 9. 시스템 관측성 및 로깅 아키텍처 -->
+The system requires robust observability to monitor background jobs and API failures. All system logs are stored in a local SQLite database to adhere to the Zero-Setup philosophy.
+
+### 9.1 SystemLog Schema
+The `SystemLog` table explicitly defines errors and warnings. String-only logs are insufficient for debugging.
+- `id`: String (Primary Key, UUID)
+- `timestamp`: String (ISO 8601, Indexed for fast sorting and pruning)
+- `level`: String (INFO, WARN, ERROR, CRITICAL)
+- `category`: String (e.g., 'API Error', 'LLM Generation Error')
+- `message`: String (Human-readable summary)
+- `source`: String (Module origin, e.g., 'Backend / LLM Service')
+- `event_name`: String (Specific code event, e.g., 'gemini_api_timeout')
+- `details`: Text (JSON string containing stack traces, request IDs, and variables)
+- `jobId`: String (Nullable)
+- `statusCode`: Integer (Nullable)
+- `resolved`: Boolean (Default false)
+
+### 9.2 Zero Silent Failures & DB Contention Prevention
+- **Exception-Safe Logging (Shadow Path)**: Logging must NEVER crash the primary business logic. Every database log insert is wrapped in a strict `try...except` block targeting DB exceptions (`sqlite3.OperationalError`, `sqlalchemy.exc.OperationalError`). If the DB insert fails due to lock contention, the logger falls back to standard Python `sys.stderr`.
+- **Decoupled Pruning**: Log retention (default 7 days) is enforced via a periodic/probabilistic background cleanup routine, NOT via `DELETE FROM` queries on every insert, preserving SQLite write throughput.
+
+### 9.3 Dashboard & OOM Prevention
+- **Strict Pagination**: To prevent Out-Of-Memory (OOM) crashes on the FastAPI server or frontend, the `/api/admin/health` endpoint strictly enforces pagination (`limit` and `offset`) and indexed filtering.
+- **Zero-Setup Migrations**: The `SystemLog` table is dynamically instantiated on FastAPI startup (e.g., via `Base.metadata.create_all(bind=engine)`), eliminating the need for manual CLI migration commands (`alembic`).
+
+## 10. Automated AI Persona QA System (Decoupled Black-Box)
+<!-- [KR] 10. AI 페르소나 기반 자동화 QA 시스템 (블랙박스 아키텍처) -->
+To rigorously evaluate the pedagogical effectiveness of the Socratic Tutor (Discussion Mode) without tightly coupling testing logic to the backend codebase, the system utilizes an isolated, offline QA harness (`qa_harness/evaluate.py`).
+
+### 10.1 Decoupled API-Driven Architecture
+The QA system runs as a completely independent HTTP client. It does not import any backend modules. Instead, it interacts with the backend strictly via its public REST API, exactly simulating a frontend client.
+- **Pre-flight Health Check**: Before executing tests, the QA runner pings `/api/health` to verify the backend is online, using configurable base URLs (`QA_API_BASE_URL`) rather than hardcoded localhost ports.
+- **State Isolation**: Every HTTP request from the QA harness injects an `X-QA-Test-Mode: true` header. The backend detects this header to ensure test data is either kept in-memory or rolled back, preventing pollution of the production SQLite database.
+
+### 10.2 Three-LLM Architecture
+The framework utilizes three distinct LLM roles completely isolated from each other:
+1. **AI Student (Gemini 3.5 Flash-Lite)**: Adopts a specific persona (defined in `qa_harness/personas.yaml`) and initiates naive or challenging questions.
+2. **Socratic Tutor**: The actual production backend logic being tested via HTTP.
+3. **The Judge (Gemini 3.6 Pro)**: Reads the transcript and scores the Tutor based on pedagogical rubrics.
+
+### 10.3 Resilience and Observability
+- **Asymmetric Timeouts**: To accommodate slow LLM generations on the backend, the QA HTTP client uses a strict 5-second `Connect Timeout` but a generous 120-second `Read Timeout`. Explicit exceptions (`httpx.ReadTimeout`, `httpx.ConnectError`) are caught to differentiate backend crashes from LLM bottlenecks.
+- **Correlation Tracing**: The QA runner injects a unique `X-Correlation-ID` header into every request. On `httpx.HTTPStatusError` (e.g., 500 Server Error), this ID is logged to seamlessly trace the exact error trace in the backend logs.
+- **Concurrency & Backoff**: Tests run with an `asyncio.Semaphore` limit to prevent self-DDoS. Exponential backoff is natively implemented for handling `429 Too Many Requests` from LLM providers.
+- **JSON Parsing Safeguards**: The Judge's output relies on native Structured Outputs. The system specifically catches `pydantic.ValidationError` or `json.JSONDecodeError`, retries twice, and falls back to a `JudgeFormatError` dumping raw output.

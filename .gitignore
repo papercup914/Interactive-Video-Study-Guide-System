@@ -3,6 +3,12 @@ venv/
 .venv/
 env/
 .env
+.env.*
+backend/.env
+backend/.env.*
+frontend/.env
+frontend/.env.*
+*.pem
 
 # Python Cache
 __pycache__/
@@ -18,6 +24,7 @@ tmp/
 
 # Frontend
 frontend/node_modules/
+frontend/.next/
 frontend/dist/
 frontend/build/
 

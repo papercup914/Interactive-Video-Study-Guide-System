@@ -11,8 +11,10 @@ def _ensure_dir_exists():
         os.makedirs(TMP_DIR)
 
 def get_url_hash(url: str) -> str:
-    """URL의 MD5 해시값을 반환합니다."""
-    return hashlib.md5(url.encode('utf-8')).hexdigest()
+    """URL의 MD5 해시값을 반환합니다. 유튜브의 경우 video_id를 추출하여 정규화합니다."""
+    vid = extract_video_id(url)
+    key = f"youtube_{vid}" if vid else url
+    return hashlib.md5(key.encode('utf-8')).hexdigest()
 
 def download_audio(url: str) -> str:
     """
@@ -53,8 +55,8 @@ def download_audio(url: str) -> str:
     except Exception as e:
         raise Exception(f"영상 다운로드 중 오류가 발생했습니다: {e}")
 
-def get_video_title(url: str) -> str:
-    """URL에서 영상 제목을 추출합니다."""
+def get_video_metadata(url: str) -> dict:
+    """URL에서 영상 제목과 길이(초)를 추출합니다."""
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
@@ -64,9 +66,13 @@ def get_video_title(url: str) -> str:
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-            return info.get('title', '제목 알 수 없음')
+            duration_sec = info.get('duration', 0)
+            return {
+                "title": info.get('title', '제목 알 수 없음'),
+                "duration": duration_sec
+            }
     except Exception:
-        return '제목 알 수 없음'
+        return {"title": '제목 알 수 없음', "duration": 0}
 
 def extract_video_id(url: str) -> str:
     """Extract YouTube video ID from URL"""
@@ -118,7 +124,12 @@ def get_youtube_transcript(url: str) -> str:
                         
         if transcript:
             fetched = transcript.fetch()
-            text_blocks = [item['text'] for item in fetched]
+            text_blocks = []
+            for item in fetched:
+                if isinstance(item, dict):
+                    text_blocks.append(item['text'])
+                else:
+                    text_blocks.append(getattr(item, 'text', str(item)))
             return " ".join(text_blocks)
             
     except Exception as e:

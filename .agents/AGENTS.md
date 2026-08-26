@@ -97,10 +97,12 @@
   <!-- [KR] 한국어 주석 추가: 영문 텍스트 바로 아래나 옆에 HTML 주석으로 한국어 번역이나 설명을 반드시 제공해야 합니다. -->
   - Format: <!-- [KR] 한국어 번역 또는 설명 -->
     <!-- [KR] 형식: <!-- [KR] 한국어 번역 또는 설명 --\> -->
-- Applies to all documentation, DESIGN.md, plans, and READMEs.
-  <!-- [KR] 모든 문서, DESIGN.md, 기획서 및 README에 적용됩니다. -->
-- EXCEPTION: Do NOT apply this rule to internal AI configuration files (like `AGENTS.md` or `.agents/AGENTS.md`) to save tokens and optimize costs. Write config files strictly in English.
-  <!-- [KR] 예외: 토큰 절약 및 비용 최적화를 위해 `AGENTS.md`와 같은 내부 AI 설정 파일에는 이 규칙을 적용하지 마세요. 설정 파일은 영문으로만 작성합니다. -->
+- Applies to core project documentation (DESIGN.md, READMEs, etc.).
+  <!-- [KR] 핵심 프로젝트 문서(DESIGN.md, README 등)에 적용됩니다. -->
+- EXCEPTION: Do NOT apply this rule to internal AI configuration files (like `AGENTS.md` or `.agents/AGENTS.md`) to save tokens. Write config files strictly in English.
+  <!-- [KR] 예외: 내부 AI 설정 파일은 영문으로만 작성합니다. -->
+- EXCEPTION: Ephemeral AI planning artifacts (e.g., `implementation_plan.md`, `task.md`, `walkthrough.md`) generated in the AI's internal brain folder MUST be written ENTIRELY in Korean, without English. This reduces token overhead since these files are continuously read by the AI but not stored in the main project directory.
+  <!-- [KR] 예외: AI 내부 폴더에 임시로 생성되는 기획서나 태스크 문서(implementation_plan.md 등)는 토큰 소모를 줄이기 위해 영문 없이 100% 한국어로만 작성합니다. -->
 </RULE[markdown_language_override]>
 
 <RULE[design_first_development]>
@@ -192,7 +194,11 @@
 -->
 - Next.js 15+ Tunneling: When tunneling a Next.js application to the outside world (e.g., using Cloudflare Tunnels, ngrok, localtunnel), NEVER use the dev server (`npm run dev`) as the strict host checks and WebSocket HMR will block connections and cause infinite loading.
 - Mandatory Fix: You MUST switch the application to production mode (`npm run build && npm run start`) before exposing the port to bypass development origin checks.
-- Mandatory Rebuild on Edit: Because the application is running in production mode, Hot Module Replacement (HMR) is disabled. If you modify any frontend code (.tsx, .css, etc.), you MUST kill the running Next.js background task, run `npm run build` again, and restart it before telling the user to refresh the browser.
+- Proactive Auto-Rebuild on Edit: Because HMR is disabled in production mode, you MUST automatically handle the rebuild and restart process yourself. NEVER ask the user to manually restart the server.
+  1. Find and kill the existing Next.js process (e.g., using `netstat -ano | findstr :3000` and `Stop-Process` on Windows), even if the user ran it manually in their own terminal.
+  2. Run `npm run build`.
+  3. Start the server (`npm run start`) as a background daemon task.
+  4. Only notify the user to refresh the browser AFTER the server is fully back online.
 </RULE[nextjs_tunneling_production_mode]>
 
 <RULE[react_large_list_virtualization]>
@@ -351,6 +357,7 @@
   2. `ceo_review_agent`: A CEO/Founder-Mode Plan Reviewer. Use when the user has a plan or architecture and needs it rigorously reviewed for failure modes, edge cases, and scope calibration (Zero silent failures). (Prompt source: `.agents/gstack_prompts/ceo_review_agent.md`)
   3. `design_consultation_agent`: A Senior Product Designer. Use when the user needs a complete visual design system, aesthetic direction, or UI/UX first-principles thinking. (Prompt source: `.agents/gstack_prompts/design_consultation_agent.md`)
 - Routing Mandatory: If the user asks for design system ideas, a plan review, or product brainstorming, DO NOT just answer as the technical engineer. Instead, read the corresponding prompt file in `.agents/gstack_prompts/` and pass its content as the `system_prompt` when defining the subagent, then invoke the subagent to handle the ideation.
+- Manual Operation: Manually killing the previous background process and starting a new one as separate tool calls is highly recommended.
 </RULE[gstack_ideation_subagents]>
 
 <RULE[ui_state_preservation]>
@@ -365,3 +372,58 @@
 - No Blind Copy-Paste: NEVER blind-copy the mockup. You must ensure all `useState`, `onClick`, `onSubmit` handlers, conditional renderings, hidden tooltips, and loading states are meticulously preserved and mapped onto the new UI elements.
   <!-- [KR] 맹목적인 복붙 금지: 시안을 맹목적으로 복사하지 마세요. 모든 상태, 클릭 이벤트, 조건부 렌더링, 숨겨진 툴팁 및 로딩 상태가 새로운 UI 요소에 꼼꼼하게 매핑되고 보존되었는지 확인해야 합니다. -->
 </RULE[ui_state_preservation]>
+
+<RULE[backward_compatibility_and_migration]>
+<!-- 
+[KR] ���� ȣȯ�� �� ������ ���̱׷��̼� �ʼ� ��Ģ 
+-->
+- Data Migration Mandatory: Whenever you change a data storage mechanism (like moving from JSON to SQLite), database schema, or file format, you MUST NOT assume the system starts from a clean slate. 
+- Migration Script: Before declaring the task "Done", you MUST proactively write and execute a migration script to seamlessly transfer all existing user data to the new structure.
+- State Verification: Verify that the exact number of previous records matches the new records before notifying the user.
+</RULE[backward_compatibility_and_migration]>
+
+<RULE[auto_goal_escalation]>
+<!-- 
+[KR] ���⵵ �ڵ� �� �� /goal ������ ���� ��Ģ (Auto /goal Escalation)
+-->
+- Shift the Burden: The user should NEVER have to guess whether a task is "complex", "long-running", or "architectural". You (the AI) must evaluate the blast radius of every normal user request.
+- Proactive Escalation: If a normal user request involves touching multiple files across different layers (e.g., frontend + backend + database), introducing new technologies, or requires a multi-step execution plan, you MUST NOT start coding immediately.
+- Suggest /goal: Instead, stop and reply: "�� �۾��� �ý��� ���ݿ� ������ ��ġ�� ū �۾��Դϴ�. �����ϰ� ö���� ������ ���� /goal [��û ����] ���·� �ٽ� �Է��� �ֽñ� �����մϴ�." (Explain exactly why it is a big task).
+- Small Tasks: If the task is isolated or simple, just execute it normally without making a fuss.
+</RULE[auto_goal_escalation]>
+
+<RULE[mandatory_subagent_review]>
+<!-- 
+[KR] ��ȹ�� �ۼ� �� ���� ������Ʈ �ڵ� ���� ���� ��Ģ (Subagent Red-Teaming)
+-->
+- Subagent Red-Teaming: Whenever you create an implementation_plan.md for a complex task or architecture change, you MUST NOT ask the user for approval right away.
+- Background Review: You MUST autonomously invoke the ceo_review_agent (or another appropriate subagent) in the background using the invoke_subagent tool. Pass your draft implementation plan to it.
+- Ask for Criticism: Explicitly instruct the subagent to ruthlessly hunt for missing backward compatibility, forgotten data migrations, edge cases, and failure modes.
+- Self-Correction: You MUST wait for the subagent's reply and integrate its feedback to improve your implementation_plan.md.
+- Final Presentation: Only AFTER refining the plan with the subagent's feedback are you allowed to present the final plan to the user and request their "Proceed" approval.
+</RULE[mandatory_subagent_review]>
+
+
+<RULE[react_markdown_custom_components]>
+<!-- 
+[KR] ReactMarkdown 커스텀 컴포넌트 TypeScript 에러 방지 규칙
+-->
+- When mapping non-standard custom HTML tags (e.g., `<quiz>`, `<discussion>`) to the `components` prop in `react-markdown` within a TypeScript environment, you MUST cast the components object to `any` (e.g., `components={{ custom: MyComponent } as any}`) to prevent build failures caused by strict `Components` type checking.
+</RULE[react_markdown_custom_components]>
+
+<RULE[react_markdown_html5_parsing]>
+<!-- 
+[KR] ReactMarkdown과 HTML5 커스텀 태그 파싱 규칙
+-->
+- Self-Closing Custom Tags: When using `rehype-raw` in `react-markdown` to parse custom HTML tags (e.g., `<quiz />`), be aware that HTML5 parsers do NOT support self-closing syntax for non-void custom elements. The parser will swallow the tag and fail to render it.
+- Explicit Closing Required: You MUST explicitly use an opening and closing tag (e.g., `<quiz></quiz>`) or use a regex in your markdown pre-processor to convert self-closing tags (`<quiz ... />` -> `<quiz ...></quiz>`) before passing the content to `ReactMarkdown`.
+</RULE[react_markdown_html5_parsing]>
+
+<RULE[mobile_fullbleed_text_ui]>
+<!-- 
+[KR] 모바일 텍스트 꽉 찬 화면(Full-bleed) UI 규칙
+-->
+- When designing mobile responsive views for text-heavy applications (like blogs, guides, reading apps), you MUST prioritize text density and readability over aesthetic "card" wrappers.
+- Do NOT use large margins, paddings, or rounded card containers on mobile devices that waste horizontal space.
+- Mandatory Implementation: Use Tailwind responsive prefixes to ensure full-bleed on mobile (e.g., `px-0 md:px-4`, `p-4 md:p-8`, `rounded-none md:rounded-3xl`, `border-x-0 md:border-x-2`).
+</RULE[mobile_fullbleed_text_ui]>

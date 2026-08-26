@@ -33,3 +33,12 @@
 ## 5. Loop Engineering (Critique & Revise)
 - **Idea**: Introduce a multi-agent or self-reflection loop to drastically increase the quality and prevent hallucination. A lightweight evaluator model critiques the generated chapter against the transcript, forcing a rewrite if it fails the quality threshold. Deferred due to API cost and latency concerns.
   <!-- [KR] 루프 엔지니어링 (검열 및 재작성): 환각(Hallucination) 방지와 품질 극대화를 위해 경량 모델 기반의 검열관 AI를 도입. 생성된 챕터가 기준에 미달하면 재작성을 강제하는 루프 구조. 현재는 API 비용 및 대기 시간 증가 문제로 보류됨. -->
+
+## 6. Self-Generated Full Courses (Curriculum Builder)
+- **Idea**: Allow the system to generate entire curriculums proactively, entirely replacing traditional paid courses or academies.
+  <!-- [KR] 자체 강의 생성 기능: 철저히 개인화된 학습서를 스스로 만들어갈 수 있는 기능을 제공. 이를 통해 유료 강의나 학교/학원을 완전히 대체하는 것을 목표로 함. -->
+  - **Examples**:
+    - Pre-generating a "Complete React Developer Course" so users don't need to buy tutorials.
+      <!-- [KR] 돈 내고 듣는 "React 강의" 필요 없이, React 전 과정 학습서를 미리 생성해 놓기. -->
+    - Generating "Complete 7th Grade Math" for children who struggle to adapt to traditional school environments due to personal issues.
+      <!-- [KR] 개인적인 문제로 학교에 적응하지 못하는 아이들을 위한 "중학교 1학년 수학 전과정" 학습서 미리 생성해 놓기. -->

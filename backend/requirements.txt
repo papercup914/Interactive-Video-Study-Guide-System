@@ -14,3 +14,7 @@ requests
 chromadb
 google-genai
 tenacity
+pyjwt[crypto]
+python-jose[cryptography]
+cryptography
+httpx

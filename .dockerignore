@@ -1,0 +1,2 @@
+# Exclude Dev-Only QA Harness from production deployments
+qa_harness/

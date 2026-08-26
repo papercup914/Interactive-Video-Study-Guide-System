@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import List
 import os
@@ -16,8 +16,14 @@ class DiscussionRequest(BaseModel):
     message: str
 
 @router.post("/chat")
-async def chat(request: DiscussionRequest):
+async def chat(request: DiscussionRequest, req: Request):
     try:
+        qa_test_mode = req.headers.get("x-qa-test-mode", "false").lower() == "true"
+        correlation_id = req.headers.get("x-correlation-id", "unknown")
+        
+        if qa_test_mode:
+            print(f"[QA TEST MODE] DB Save bypassed. Correlation-ID: {correlation_id}")
+
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key or api_key == "여기에_GEMINI_API_키를_입력하세요":
             raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not configured.")
@@ -45,7 +51,12 @@ async def chat(request: DiscussionRequest):
             contents=prompt
         )
         
-        return {"reply": response.text.strip()}
+        try:
+            reply_text = response.text.strip()
+        except ValueError:
+            reply_text = "응답이 유해성 필터 등에 의해 차단되었습니다."
+            
+        return {"reply": reply_text}
     except Exception as e:
         print("Error in discussion chat:", e)
         raise HTTPException(status_code=500, detail=str(e))

@@ -107,134 +107,100 @@ def process_audio(audio_path: str, provider: str) -> str:
     """
     선택된 Provider에 맞게 오디오를 처리하여 텍스트 대본(Transcript)을 반환합니다.
     로컬에 이미 캐시된 대본이 있으면 API를 호출하지 않고 캐시를 반환합니다.
+    OpenAI Whisper 호출 실패(크레딧 부족, Quota 초과, 네트워크 에러 등) 시 자동으로 Gemini 멀티모달 오디오 변환으로 Fallback 처리합니다.
     """
+    if not audio_path or not os.path.exists(audio_path):
+        raise ValueError(f"오디오 파일이 존재하지 않거나 잘못된 경로입니다: {audio_path}")
+
     url_hash = os.path.splitext(os.path.basename(audio_path))[0]
     data_dir = "backend/data"
     if not os.path.exists(data_dir):
-        os.makedirs(data_dir)
+        os.makedirs(data_dir, exist_ok=True)
         
     cache_file = os.path.join(data_dir, f"{url_hash}_transcript.txt")
     if os.path.exists(cache_file):
         with open(cache_file, "r", encoding="utf-8") as f:
-            return f.read()
+            cached_text = f.read()
+            if cached_text and cached_text.strip():
+                return cached_text
 
     transcript = ""
+    whisper_done = False
+
     # OpenAI 계열 (Whisper) 우선 시도
     openai_key = os.getenv("OPENAI_API_KEY")
     if openai_key and openai_key != "여기에_OPENAI_API_키를_입력하세요" and provider != "Google Gemini":
-        client = get_openai_client("OpenAI (GPT-4o)")
-        
-        chunk_paths = _split_audio_if_needed(audio_path, max_size_mb=20)
-        
-        for chunk_path in chunk_paths:
-            with open(chunk_path, "rb") as audio_file:
-                transcript_response = client.audio.transcriptions.create(
-                    model="whisper-1", 
-                    file=audio_file, 
-                    response_format="text"
-                )
-            transcript += transcript_response + " "
+        try:
+            client = get_openai_client("OpenAI (GPT-4o)")
+            chunk_paths = _split_audio_if_needed(audio_path, max_size_mb=20)
+            temp_transcript = ""
             
-            # 분할 생성된 임시 파일 삭제 (원본은 유지)
-            if chunk_path != audio_path:
-                try:
-                    os.remove(chunk_path)
-                except:
-                    pass
-    else:
+            for chunk_path in chunk_paths:
+                with open(chunk_path, "rb") as audio_file:
+                    transcript_response = client.audio.transcriptions.create(
+                        model="whisper-1", 
+                        file=audio_file, 
+                        response_format="text"
+                    )
+                temp_transcript += transcript_response + " "
+                
+                # 분할 생성된 임시 파일 삭제 (원본은 유지)
+                if chunk_path != audio_path:
+                    try:
+                        os.remove(chunk_path)
+                    except Exception:
+                        pass
+            
+            if temp_transcript.strip():
+                transcript = temp_transcript.strip()
+                whisper_done = True
+        except Exception as e:
+            print(f"[Warning] OpenAI Whisper 변환 실패 ({e}). Gemini 멀티모달 오디오 변환으로 자동 Fallback합니다.")
+
+    if not whisper_done:
         # Gemini 멀티모달 오디오 분석
-        client = get_gemini_client()
-        uploaded_file = client.files.upload(file=audio_path)
-        
-        # ACTIVE 상태가 될 때까지 폴링 대기
-        while uploaded_file.state.name == "PROCESSING":
-            print(f"Gemini 오디오 처리 중 대기... (상태: {uploaded_file.state.name})")
-            time.sleep(3)
-            uploaded_file = client.files.get(name=uploaded_file.name)
+        try:
+            client = get_gemini_client()
+            uploaded_file = client.files.upload(file=audio_path)
             
-        if uploaded_file.state.name == "FAILED":
-            raise Exception("Gemini 파일 업로드 처리 실패")
-            
-        response = client.models.generate_content(
-            model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
-            contents=[uploaded_file, "Please provide a complete and highly accurate transcription of this audio in its original language. Do not summarize, format, or skip any parts. Return ONLY the transcribed text."]
-        )
-        transcript = response.text
+            # ACTIVE 상태가 될 때까지 폴링 대기
+            while uploaded_file.state.name == "PROCESSING":
+                print(f"Gemini 오디오 처리 중 대기... (상태: {uploaded_file.state.name})")
+                time.sleep(3)
+                uploaded_file = client.files.get(name=uploaded_file.name)
+                
+            if uploaded_file.state.name == "FAILED":
+                raise Exception("Gemini 파일 업로드 처리 실패")
+                
+            @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=30))
+            def _call_gemini_audio():
+                return client.models.generate_content(
+                    model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
+                    contents=[uploaded_file, "Please provide a complete and highly accurate transcription of this audio in its original language. Do not summarize, format, or skip any parts. Return ONLY the transcribed text."]
+                )
+
+            response = _call_gemini_audio()
+            if response and response.text:
+                transcript = response.text
+            else:
+                raise Exception("Gemini 오디오 변환 결과 텍스트가 비어있습니다.")
+        except Exception as e:
+            print(f"Gemini API error during audio processing: {e}")
+            raise Exception(f"오디오 변환(Whisper 및 Gemini Fallback) 처리에 실패했습니다: {e}")
 
     with open(cache_file, "w", encoding="utf-8") as f:
         f.write(transcript)
         
     return transcript
 
-async def async_map_reduce_transcript(transcript: str, provider: str, url_hash: str) -> str:
-    """
-    Map-Reduce 아키텍처: 대용량 스크립트를 여러 청크로 나누어 병렬 요약한 뒤, 하나로 합쳐 마스터 요약본을 만듭니다.
-    """
-    if len(transcript) < 20000:
-        return transcript
-        
-    cache_file = os.path.join("backend/data", f"{url_hash}_master_summary.txt")
-    if os.path.exists(cache_file):
-        with open(cache_file, "r", encoding="utf-8") as f:
-            return f.read()
 
-    chunk_size = 5000
-    overlap = 500
-    chunks = []
-    
-    start = 0
-    while start < len(transcript):
-        end = min(start + chunk_size, len(transcript))
-        chunks.append(transcript[start:end])
-        start += (chunk_size - overlap)
-        
-    print(f"[Map-Reduce] 텍스트 길이 {len(transcript)}자 -> {len(chunks)}개 청크로 분할하여 병렬 요약 시작...")
-    
-    semaphore = asyncio.Semaphore(10)
-    
-    async def summarize_chunk(idx: int, chunk: str) -> str:
-        async with semaphore:
-            prompt = f"다음은 영상 스크립트의 일부입니다. 이 내용에서 다루는 모든 핵심 개념, 중요한 인용구, 그리고 논리적 흐름을 빠짐없이 요약하세요. 원본의 정보가 유실되지 않도록 상세히 작성하세요.\n\n[스크립트 일부 시작]\n{chunk}\n[스크립트 일부 끝]"
-            
-            client = get_openai_client(provider)
-            target_model = provider
-            if provider == "OpenAI (GPT-4o)":
-                target_model = "gpt-4o"
-            elif provider == "cerebras/gpt-oss-120b":
-                target_model = "gpt-oss-120b"
-                
-            try:
-                response = await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda: client.chat.completions.create(
-                        model=target_model,
-                        messages=[{"role": "user", "content": prompt}],
-                        max_tokens=1500
-                    )
-                )
-                return f"\n\n--- [Part {idx+1}] ---\n{response.choices[0].message.content}"
-            except Exception as e:
-                print(f"Error summarizing chunk {idx+1}: {e}")
-                return f"\n\n--- [Part {idx+1}] ---\n(요약 실패 - 원본 일부 포함)\n{chunk[:500]}..."
-
-    tasks = [summarize_chunk(i, chunk) for i, chunk in enumerate(chunks)]
-    results = await asyncio.gather(*tasks)
-    
-    master_summary = "".join(results)
-    print(f"[Map-Reduce] 마스터 요약본 완성! 길이: {len(master_summary)}자")
-    
-    with open(cache_file, "w", encoding="utf-8") as f:
-        f.write(master_summary)
-        
-    return master_summary
-
-def generate_outline(context_data: str, provider: str, url_hash: str, length_preset: str = "아주 상세하게") -> List[str]:
+def generate_outline(context_data: str, provider: str, url_hash: str, length_preset: str = "아주 상세하게", force_refresh: bool = False) -> List[str]:
     """
     오디오 컨텍스트를 분석하여 상세 목차를 생성하고 로컬에 캐시합니다.
     """
     preset_suffix = "summary" if length_preset == "핵심 요약" else ("normal" if length_preset == "적당한 설명" else "detailed")
     cache_file = os.path.join("backend/data", f"{url_hash}_outline_{preset_suffix}.json")
-    if os.path.exists(cache_file):
+    if not force_refresh and os.path.exists(cache_file):
         with open(cache_file, "r", encoding="utf-8") as f:
             return json.load(f)
 
@@ -357,7 +323,7 @@ def generate_outline(context_data: str, provider: str, url_hash: str, length_pre
         
     return sections
 
-async def async_generate_chapter_content(section_title: str, context_data: str, provider: str, chunk_index: int, total_chunks: int, length_preset: str = "아주 상세하게", analogy_preset: str = "풍부한 비유", learner_profile: str = "", url_hash: str = "", tutor_persona: dict = None) -> str:
+async def async_generate_chapter_content(section_title: str, context_data: str, provider: str, chunk_index: int, total_chunks: int, length_preset: str = "아주 상세하게", analogy_preset: str = "풍부한 비유", learner_profile: str = "", url_hash: str = "", tutor_persona: dict = None, force_refresh: bool = False) -> str:
     """
     전체 스크립트를 LLM에 전달하여 챕터 내용에 해당하는 부분을 스스로 찾아서 작성하도록 합니다. (정확도 우선)
     """
@@ -370,21 +336,13 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
     os.makedirs(cache_dir, exist_ok=True)
     cache_file = os.path.join(cache_dir, f"{cache_hash}.txt")
     
-    if os.path.exists(cache_file):
+    if not force_refresh and os.path.exists(cache_file):
         with open(cache_file, "r", encoding="utf-8") as f:
             return f.read()
 
     chunked_context = context_data
     
-    if len(context_data) > 30000 and section_title != "전체 문서" and section_title != "전체 내용 요약":
-        # Map-Reduce 아키텍처가 적용된 경우 context_data는 이미 1~2만 자 수준의 master_summary이므로 이 로직을 탈 필요가 없습니다.
-        # 단, 예외적으로 매우 큰 문서가 통과될 경우를 대비해 수학적 오버랩 분할(Mathematical Chunking) 로직을 Fallback으로 남겨둡니다.
-        chunk_size = len(context_data) // total_chunks
-        overlap = chunk_size // 5
-        start_idx = max(0, chunk_index * chunk_size - overlap)
-        end_idx = min(len(context_data), (chunk_index + 1) * chunk_size + overlap)
-        chunked_context = context_data[start_idx:end_idx]
-        print(f"[Optimization] Math Chunked context for '{section_title}': {len(chunked_context)} chars (Original: {len(context_data)} chars)")
+
     
     if length_preset == "문서 원본 번역":
         # Document translation mode: 1:1 translation keeping markdown images intact
@@ -395,7 +353,7 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
         
         [매우 중요] 
         - 문서에 포함된 표(Table) 형태나 마크다운 이미지 태그(예: `![caption](url)`)는 절대 수정하거나 삭제하지 말고 제자리에 그대로 유지하십시오.
-        - 내용을 임의로 요약하거나 튜터와 같은 말투를 쓰지 마십시오. 오직 원문을 한국어로 직역(Professional Translation)만 하십시오.
+        - 내용을 임의로 요약하거나 가르치는 듯한 말투를 쓰지 마십시오. 오직 원문을 한국어로 직역(Professional Translation)만 하십시오.
         - 만약 '{section_title}'이 "전체 문서"라면 제공된 원본 전체를 처음부터 끝까지 빠짐없이 번역하십시오.
         """
     else:
@@ -453,26 +411,59 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
         
         프롬프트 가이드라인:
         - {analogy_instruction}
-        - 개념 돋보기 박스(Markdown 인용구 > 문법 사용)를 만들어 핵심을 짚어줘라.
+        - 핵심 인사이트 박스(Markdown 인용구 > 문법 사용)를 만들어 핵심을 짚어줘라.
         - {length_instruction}
-        - [중요] 챕터 본문 작성이 끝난 후, 가장 마지막에 학습자의 이해도를 점검할 수 있는 객관식 퀴즈 1~2개와 심화 학습을 위한 서술형 토론 주제 1개를 출제하세요.
-        퀴즈는 반드시 아래와 같이 JSON 배열을 `<quiz></quiz>` 태그로 감싸는 정확한 형식으로만 출력해야 합니다 (모든 오답에 대한 개별 해설 포함 필수):
-      <quiz>
-      [
+        - [중요: 적응형 인지 라우팅 체계 및 인터랙티브 학습 장치 생성]
+        챕터 본문 작성이 끝난 후, 이 챕터의 핵심 지식 성격을 분석하여 다음 4가지 인지 영역 중 하나로 분류하고, 해당 영역에 맞는 특수한 인터랙티브 태그를 **정확히 하나만** 가장 마지막에 출력하세요. (기존의 객관식 퀴즈나 토론 주제는 출력하지 마세요)
+        
+        [치명적 주의사항]
+        - 반드시 XML 형태의 여는 태그와 닫는 태그(예: <feynman> ... </feynman>)로 전체 JSON을 감싸야 합니다!
+        - 태그 안에 띄어쓰기를 절대 넣지 마세요. (정상: <feynman>, 오류: < feynman >)
+        - 태그 없이 JSON 텍스트만 덩그러니 출력하면 시스템 파서 에러가 발생하여 서비스가 중단됩니다.
+
+        1. 개념 이해 (CONCEPT): 원리, 이유, 복잡한 메커니즘을 다루는 챕터.
+        <feynman>
         {{
-          "question": "첫 번째 객관식 퀴즈 질문",
-          "options": ["보기1", "보기2", "보기3", "보기4"],
-          "answerIndex": 0,
-          "feedback": [
-            "보기1(정답)에 대한 튜터 어조의 상세한 해설",
-            "보기2(오답)가 틀린 이유에 대한 친절한 해설",
-            "보기3(오답)가 틀린 이유 해설",
-            "보기4(오답)가 틀린 이유 해설"
+          "tag_team_scenario": "학습자와 AI가 한 팀이 되어 관련 지식이 전혀 없는 초보자(예: 중학생, 비전공자 등)에게 이 개념을 쉽게 설명하는 흥미로운 상황 제시",
+          "target_persona": "설명을 들을 가상의 초보자 특징 (예: '중력을 처음 배우는 초등학생')",
+          "initial_ai_message": "AI가 먼저 사고 실험 파트너로서 대화를 시작하며 반자동 완성을 유도하는 문장 (예: '자, 이 학생에게 중력을 설명해보자. 중력은 보이지 않는 끈과 같은데, 왜냐하면...')",
+          "concept_summary": "사용자가 도저히 모를 때(SOS) 즉시 보여줄 아주 쉽고 완벽한 1문단짜리 비유적 정답 요약"
+        }}
+        </feynman>
+
+        2. 논리/수학/알고리즘 (LOGIC): 단계별 증명, 코드의 흐름, 수학적 도출을 다루는 챕터.
+        <steptracer>
+        {{
+          "scenario": "풀어야 할 문제 상황이나 코드 스니펫",
+          "steps": [
+            {{"question": "이 루프를 한 번 돌고 나면 변수 x의 값은 무엇이 될까요?", "answer": "x는 5가 됩니다. 왜냐하면..."}},
+            {{"question": "다음 단계는?", "answer": "..."}}
           ]
         }}
-      ]
-      </quiz>
-      <discussion topic="여기에 심화 학습을 유도하는 서술형 토론 주제를 하나 작성" />
+        </steptracer>
+
+        3. 단순 암기 (MEMORY): 연도, 사실관계, 용어의 정의 등 논리적 설명보다 단순 기억이 필요한 챕터.
+        <mnemonic>
+        {{
+          "story": "학습자의 관심사나 아주 기상천외한 요소(Bizarre)를 활용하여 이 사실을 평생 잊지 않게 만들어주는 짧고 강렬한 연상기억법 스토리",
+          "flashcards": [
+            {{"q": "앞면 질문", "a": "뒷면 정답"}},
+            {{"q": "앞면 질문", "a": "뒷면 정답"}}
+          ]
+        }}
+        </mnemonic>
+
+        4. 절차적/시각적 작업 (PROCEDURE): 툴 사용법, 매듭 묶는 법, 요리 순서 등 행동 지침이 필요한 챕터.
+        <procedure>
+        {{
+          "checklists": [
+            {{"step": 1, "action": "매직 봉 툴을 선택한다", "hint": "화면 좌측 도구 모음에 있습니다"}},
+            {{"step": 2, "action": "...", "hint": "..."}}
+          ]
+        }}
+        </procedure>
+
+        반드시 4가지 중 현재 챕터에 가장 적합한 1가지만 골라 정확한 JSON 구조로 태그를 감싸서 출력하세요. 태그의 시작과 끝이 명확해야 합니다.
     """
     
     loop = asyncio.get_event_loop()
@@ -555,7 +546,7 @@ def generate_answer(selected_text: str, context: str, question: str, provider: s
     본문 컨텍스트를 바탕으로 사용자가 선택한 특정 텍스트에 대한 질문에 답변을 생성합니다.
     """
     prompt = f"""
-    당신은 학습자의 질문에 답하는 1:1 맞춤형 AI 튜터입니다.
+    당신은 학습자의 질문에 답하는 1:1 맞춤형 사고 확장 파트너입니다.
     사용자가 문서 학습 중 특정 단어나 문장을 선택하여 질문을 남겼습니다.
     
     [전체 문맥 (배경 지식 참고용)]: 
@@ -573,7 +564,7 @@ def generate_answer(selected_text: str, context: str, question: str, provider: s
     [학습자 프로필]
     {learner_profile if learner_profile else "일반적인 성인 학습자"}
     
-    1. 어조 강제: 명시된 '원하는 튜터 어조'를 철저하게 유지하십시오.
+    1. 어조 강제: 명시된 '원하는 어조'를 철저하게 유지하십시오.
     2. 비유 강제: 이해를 돕기 위해 반드시 프로필의 '주요 관심사'에 빗대어 찰떡같은 비유를 하나 들어주세요.
     3. 눈높이 강제: '학습 목표'와 '연령대/직업'에 맞추어 어휘를 선택하십시오.
     </PERSONA_DIRECTIVE>
@@ -602,7 +593,7 @@ def generate_answer(selected_text: str, context: str, question: str, provider: s
         response = client.chat.completions.create(
             model=target_model,
             messages=[
-                {"role": "system", "content": "당신은 본문 내용을 바탕으로 독자의 질문에 친절하게 답변하는 AI 튜터입니다."},
+                {"role": "system", "content": "당신은 본문 내용을 바탕으로 독자의 질문에 친절하게 답변하는 사고 파트너입니다."},
                 {"role": "user", "content": prompt}
             ]
         )
@@ -749,3 +740,5 @@ def profile_content(context_data: str, provider: str) -> dict:
             "analogy_preset": "적절한 비유 추가",
             "profile_message": "💡 영상 길이에 맞는 기본 설정으로 정리했습니다."
         }
+
+
