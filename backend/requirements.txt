@@ -8,6 +8,7 @@ beautifulsoup4
 google-generativeai
 google-genai
 youtube-transcript-api
+yt-dlp
 requests
 httpx
 tenacity
@@ -17,3 +18,4 @@ cryptography
 celery
 redis
 sqlalchemy
+certifi
