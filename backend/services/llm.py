@@ -191,7 +191,7 @@ def process_audio(audio_path: str, provider: str) -> str:
             @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=30))
             def _call_gemini_audio():
                 return client.models.generate_content(
-                    model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
+                    model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-2.5-flash"),
                     contents=[uploaded_file, "Please provide a complete and highly accurate transcription of this audio in its original language. Do not summarize, format, or skip any parts. Return ONLY the transcribed text."]
                 )
 
@@ -279,7 +279,7 @@ def generate_outline(context_data: str, provider: str, url_hash: str, length_pre
             contents_payload = [context_data, prompt]
             
         response = client.models.generate_content(
-            model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
+            model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-2.5-flash"),
             contents=contents_payload,
             config=config
         )
@@ -497,7 +497,7 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
         client = get_gemini_client()
         if chunked_context.startswith("GEMINI_FILE_URI::"):
             file_name = chunked_context.split("::")[1]
-            model_id = os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite")
+            model_id = os.getenv("SELECTED_GEMINI_VERSION", "gemini-2.5-flash")
             
             try:
                 # Context Caching 적용 (Option B)
@@ -524,7 +524,7 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
             contents_payload = [chunked_context, system_prompt]
             
             response = client.models.generate_content(
-                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
+                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-2.5-flash"),
                 contents=contents_payload
             )
             return response.text
@@ -610,7 +610,7 @@ def generate_answer(selected_text: str, context: str, question: str, provider: s
         try:
             client = get_gemini_client()
             response = client.models.generate_content(
-                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
+                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-2.5-flash"),
                 contents=[prompt]
             )
             return response.text
@@ -647,7 +647,7 @@ def generate_answer(selected_text: str, context: str, question: str, provider: s
             print(f"[Harness Fallback] OpenAI answer failed: {e}. Switching to Gemini.")
             client = get_gemini_client()
             response = client.models.generate_content(
-                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
+                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-2.5-flash"),
                 contents=[prompt]
             )
             return response.text
@@ -670,7 +670,7 @@ def translate_title(title: str, provider: str) -> str:
         if is_gemini_provider(provider):
             client = get_gemini_client()
             response = client.models.generate_content(
-                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
+                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-2.5-flash"),
                 contents=[prompt]
             )
             return response.text.strip().strip('"')
@@ -694,7 +694,7 @@ def translate_title(title: str, provider: str) -> str:
             except Exception:
                 client = get_gemini_client()
                 response = client.models.generate_content(
-                    model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
+                    model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-2.5-flash"),
                     contents=[prompt]
                 )
                 return response.text.strip().strip('"')
@@ -718,7 +718,7 @@ def extract_image_keyword(title: str, provider: str) -> str:
         if is_gemini_provider(provider):
             client = get_gemini_client()
             response = client.models.generate_content(
-                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
+                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-2.5-flash"),
                 contents=[prompt]
             )
             keyword = response.text.strip().replace('"', '')
@@ -739,7 +739,7 @@ def extract_image_keyword(title: str, provider: str) -> str:
             except Exception:
                 client = get_gemini_client()
                 response = client.models.generate_content(
-                    model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
+                    model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-2.5-flash"),
                     contents=[prompt]
                 )
                 keyword = response.text.strip().replace('"', '')
@@ -779,7 +779,7 @@ def profile_content(context_data: str, provider: str) -> dict:
         if is_gemini_provider(provider):
             client = get_gemini_client()
             response = client.models.generate_content(
-                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
+                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-2.5-flash"),
                 contents=[prompt]
             )
             raw_text = response.text.strip()
@@ -798,7 +798,7 @@ def profile_content(context_data: str, provider: str) -> dict:
             except Exception:
                 client = get_gemini_client()
                 response = client.models.generate_content(
-                    model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
+                    model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-2.5-flash"),
                     contents=[prompt]
                 )
                 raw_text = response.text.strip()

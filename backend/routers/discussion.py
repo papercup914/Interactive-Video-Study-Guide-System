@@ -47,7 +47,7 @@ async def chat(request: DiscussionRequest, req: Request):
         prompt += f"\n학생: {request.message}\n튜터:"
 
         response = client.models.generate_content(
-            model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
+            model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-2.5-flash"),
             contents=prompt
         )
         

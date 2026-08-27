@@ -27,7 +27,7 @@ def evaluate_learning_profile(question: str, answer: str) -> dict:
     try:
         client = get_gemini_client()
         response = client.models.generate_content(
-            model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
+            model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-2.5-flash"),
             contents=[prompt]
         )
         raw = response.text.strip()
@@ -60,7 +60,7 @@ def generate_global_evaluation(profiles_data: str) -> str:
     try:
         client = get_gemini_client()
         response = client.models.generate_content(
-            model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
+            model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-2.5-flash"),
             contents=[prompt]
         )
         return response.text
