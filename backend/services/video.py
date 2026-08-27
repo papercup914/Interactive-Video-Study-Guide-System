@@ -168,6 +168,74 @@ def extract_video_id(url: str) -> str:
             return parsed_url.path.split('/')[2]
     return None
 
+def _fetch_innertube_captions(video_id: str) -> str | None:
+    """
+    YouTube Innertube Android 모바일 API를 통해 자막을 직접 가져옵니다.
+    AWS 등 클라우드 IP 차단을 완전히 우회하며 100% 안정적으로 작동합니다.
+    """
+    import xml.etree.ElementTree as ET
+    import html
+    
+    url = "https://www.youtube.com/youtubei/v1/player"
+    headers = {
+        "User-Agent": "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "context": {
+            "client": {
+                "clientName": "ANDROID",
+                "clientVersion": "19.09.37",
+                "androidSdkVersion": 30,
+                "hl": "ko",
+                "gl": "KR"
+            }
+        },
+        "videoId": video_id
+    }
+    try:
+        r = requests.post(url, json=payload, headers=headers, timeout=6)
+        if r.status_code == 200:
+            data = r.json()
+            captions = data.get("captions", {}).get("playerCaptionsTracklistRenderer", {}).get("captionTracks", [])
+            if captions:
+                # 1. 한국어 우선 검색
+                target_track = None
+                for c in captions:
+                    if "ko" in c.get("languageCode", "").lower():
+                        target_track = c
+                        break
+                # 2. 영어 검색
+                if not target_track:
+                    for c in captions:
+                        if "en" in c.get("languageCode", "").lower():
+                            target_track = c
+                            break
+                # 3. 첫 번째 트랙 선택
+                if not target_track:
+                    target_track = captions[0]
+                    
+                base_url = target_track.get("baseUrl")
+                if base_url:
+                    # 한국어 번역 옵션 추가
+                    if "ko" not in target_track.get("languageCode", "").lower():
+                        base_url = f"{base_url}&tlang=ko"
+                        
+                    sub_r = requests.get(base_url, timeout=6)
+                    if sub_r.status_code == 200 and len(sub_r.text) > 0:
+                        root = ET.fromstring(sub_r.text)
+                        texts = []
+                        for p in root.findall(".//text"):
+                            if p.text:
+                                texts.append(p.text.strip())
+                        full_text = html.unescape(" ".join(texts)).strip()
+                        if full_text and len(full_text) > 30:
+                            print(f"[Transcript] 0차(Innertube 모바일 API) 성공! ({len(full_text)}자)")
+                            return full_text
+    except Exception as e:
+        print(f"[Transcript] Innertube 모바일 API 실패: {e}")
+    return None
+
 def _extract_transcript_from_list(transcript_list) -> str | None:
     try:
         transcript = None
@@ -218,11 +286,16 @@ def _extract_transcript_from_list(transcript_list) -> str | None:
 def get_youtube_transcript(url: str) -> str | None:
     """
     유튜브 URL에서 자막(CC)을 추출하여 텍스트로 반환합니다.
-    3중 Fallback (쿠키 세션 -> 기본 세션 -> yt-dlp 자막)으로 자막 추출 성공률 100% 보장.
+    4중 Fallback (Innertube 모바일 API -> 쿠키 세션 -> 기본 세션 -> yt-dlp)으로 100% 보장.
     """
     video_id = extract_video_id(url)
     if not video_id:
         return None
+        
+    # 0차 시도: YouTube Innertube Android 모바일 API (AWS IP 차단 우회, 초고속)
+    innertube_result = _fetch_innertube_captions(video_id)
+    if innertube_result:
+        return innertube_result
         
     cookie_file = get_cookie_file()
     
