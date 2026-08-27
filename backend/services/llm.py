@@ -784,8 +784,10 @@ def profile_content(context_data: str, provider: str) -> dict:
     {sample_text}
     """
     
+    print(f"[DEBUG LLM] profile_content called with provider='{provider}', is_gemini={is_gemini_provider(provider)}")
     try:
         if is_gemini_provider(provider):
+            print(f"[DEBUG LLM] Calling Gemini for profiling...")
             client = get_gemini_client()
             response = client.models.generate_content(
                 model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-2.5-flash"),
@@ -793,6 +795,7 @@ def profile_content(context_data: str, provider: str) -> dict:
             )
             raw_text = response.text.strip()
         else:
+            print(f"[DEBUG LLM] Calling OpenAI/ThirdParty for profiling with provider='{provider}'...")
             try:
                 client = get_openai_client(provider)
                 target_model = "gpt-4o-mini" if provider == "OpenAI (GPT-4o)" else provider

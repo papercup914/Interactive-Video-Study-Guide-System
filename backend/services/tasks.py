@@ -21,6 +21,7 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
         # request_data is a dict because Celery JSON-serializes kwargs
         url = request_data.get("url", "")
         provider = request_data.get("provider", "")
+        print(f"[DEBUG TASKS] async_generate_guide called for job_id={job_id}, raw provider='{provider}'")
         length_preset = request_data.get("length_preset", "아주 상세하게")
         analogy_preset = request_data.get("analogy_preset", "풍부한 비유")
         learner_profile = request_data.get("learner_profile", "")
