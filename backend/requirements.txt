@@ -19,3 +19,4 @@ redis
 sqlalchemy
 certifi
 python-multipart
+openai

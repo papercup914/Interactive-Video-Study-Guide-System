@@ -3,11 +3,9 @@ import json
 import asyncio
 import time
 import math
-from pydub import AudioSegment
 from google import genai
 from google.genai import types
-import openai
-from typing import List, Any
+from typing import List, Any, Optional
 from tenacity import retry, stop_after_attempt, wait_exponential
 from pydantic import BaseModel, Field
 
@@ -73,7 +71,11 @@ def get_openai_client(provider: str = None):
     if not base_url and api_key.startswith("nvapi-"):
         base_url = "https://integrate.api.nvidia.com/v1"
         
-    return openai.Client(api_key=api_key, base_url=base_url)
+    try:
+        import openai
+        return openai.Client(api_key=api_key, base_url=base_url)
+    except ImportError:
+        raise ImportError("openai 패키지가 설치되지 않았습니다. pip install openai 를 실행하세요.")
 
 def _split_audio_if_needed(audio_path: str, max_size_mb: int = 20) -> List[str]:
     """오디오 파일이 max_size_mb를 초과하면 분할하여 임시 파일 경로 목록을 반환합니다."""
@@ -82,7 +84,12 @@ def _split_audio_if_needed(audio_path: str, max_size_mb: int = 20) -> List[str]:
         return [audio_path]
         
     print(f"오디오 크기가 {file_size_mb:.2f}MB로 제한({max_size_mb}MB)을 초과하여 분할합니다.")
-    audio = AudioSegment.from_file(audio_path)
+    try:
+        from pydub import AudioSegment
+        audio = AudioSegment.from_file(audio_path)
+    except Exception as e:
+        print(f"pydub 로드 실패 또는 오디오 분할 불가: {e}. 원본 파일 사용.")
+        return [audio_path]
     
     # 20MB 제한을 위해 파일 용량 비율로 길이를 나눔
     num_chunks = math.ceil(file_size_mb / max_size_mb)
