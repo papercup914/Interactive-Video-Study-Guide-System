@@ -39,6 +39,12 @@
 ### ✅ Guide Mode (가이드 모드)
 - 유튜브 URL 입력 ➡️ 자막/오디오 추출 ➡️ Gemini 3.6 Flash 기반 목차 및 7개 챕터/퀴즈/Feynman 비유 완벽 생성 (`backend/routers/guide.py`).
 
+### ✅ YouTube 봇 차단(Bot Detection) 대응 및 자막 파이프라인
+1. **AWS EC2 IP 차단 원인 규명**: AWS 데이터센터 IP 대역에서 유튜브 요청 시 `Sign in to confirm you're not a bot` 차단 발생.
+2. **쿠키 연동 시스템 구축**: `backend/services/video.py`에 `cookies.txt` 자동 감지 로더(`get_cookie_file`) 및 MozillaCookieJar 세션 연동 구현 완료.
+3. **에러 핸들링 정제**: 봇 차단 발생 시 영문 스택트레이스 대신 사용자 친화적인 한국어 안내 메시지 반환.
+4. **진행 중인 작업**: 무료 쿠키 방식(`cookies.txt`) 등록 또는 직접 텍스트 입력 UI 확장 대기.
+
 ### ✅ Discussion Mode (토론 모드)
 - 학습서 본문 텍스트 드래그/하이라이트 ➡️ 소크라테스식 AI 튜터 챗팅 (`backend/routers/discussion.py`).
 
@@ -72,19 +78,22 @@
 ### 백엔드 (AWS EC2 `backend/.env`)
 - `APP_ENV`: `production`
 - `SUPABASE_JWT_SECRET`: Supabase JWT Secret (HS256 서명 검증)
-- `GEMINI_API_KEY`: Google Gemini API Key
+- `GEMINI_API_KEY`: Google Gemini API Key (Gemini 3.6 Flash 사용)
 - `REDIS_URL`: `redis://redis:6379/0`
+- `CELERY_BROKER_URL`: `redis://redis:6379/0`
+- `CELERY_RESULT_BACKEND`: `redis://redis:6379/0`
+- `SELECTED_GEMINI_VERSION`: `gemini-3.6-flash`
 - `CORS_ORIGINS`: `*`
 - `DISABLE_AUTH`: `false`
+- `YOUTUBE_COOKIES_TEXT`: (선택) Netscape 쿠키 텍스트
 
 ---
 
 ## 5. 다음 작업(Next Steps) 추천 과제
 
-1. **HTTPS / 도메인 보안 강화 (선택 사항)**:
-   - 현재 프론트엔드(Vercel)는 HTTPS이나 백엔드(EC2)는 HTTP(`http://13.209.73.143:8000`)로 통신 중.
-   - 브라우저 Mixed Content 경고 방지를 위해 Cloudflare Tunnel 또는 Let's Encrypt Nginx SSL 적용 고려.
-2. **PostgreSQL / Neon DB 영구 데이터베이스 연동**:
-   - 현재 SQLite 로컬 파일 기반(`jobs.db`) 동작 중이며, 필요시 Supabase/Neon PostgreSQL로 전환 가능.
-3. **관리자 대시보드 백엔드 실데이터 API 연결**:
-   - 현재 동적 Mock 데이터 기반인 Admin Health Dashboard를 실제 Celery/Redis 모니터링 API와 연결.
+1. **유튜브 쿠키 등록 또는 직접 텍스트 입력 UI 탑재**:
+   - 서버의 `backend/cookies.txt`에 일회용 부계정 쿠키를 넣거나, 메인 화면에 유튜브 스크립트/원문 텍스트 직접 입력 탭 추가.
+2. **HTTPS / Cloudflare Tunnel 보안 적용**:
+   - 브라우저 Mixed Content 경고 방지를 위해 백엔드에 무료 Cloudflare Tunnel 또는 Let's Encrypt Nginx SSL 적용.
+3. **대규모 트래픽 대비 분산 아키텍처 준비**:
+   - 트래픽 증가 시 Gemini 종량제 전환 및 Celery 동시성 확대.
