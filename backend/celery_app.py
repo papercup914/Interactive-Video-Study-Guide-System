@@ -6,8 +6,9 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
-CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0")
+redis_url = os.getenv("REDIS_URL", "").strip()
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "").strip() or redis_url or "redis://localhost:6379/0"
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "").strip() or redis_url or "redis://localhost:6379/0"
 
 celery_app = Celery(
     "studyguide_worker",

@@ -49,9 +49,16 @@ export async function updateSession(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   const isLoginPage = pathname === '/login';
   const isAuthCallback = pathname.startsWith('/auth/callback');
+  const isApiRoute = pathname.startsWith('/api/');
 
-  // If user is NOT logged in and not accessing public/login pages, redirect to /login
+  // If user is NOT logged in and not accessing public/login pages
   if (!user && !isLoginPage && !isAuthCallback) {
+    if (isApiRoute) {
+      return NextResponse.json(
+        { error: "Unauthorized", detail: "인증 세션이 만료되었거나 로그인이 필요합니다." },
+        { status: 401 }
+      );
+    }
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     if (pathname !== '/') {

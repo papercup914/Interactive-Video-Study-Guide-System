@@ -116,15 +116,39 @@ export default function Home() {
         body: formData
       });
       
+      if (!res.ok) {
+        let errorDetail = `서버 응답 오류 (상태 코드: ${res.status})`;
+        try {
+          const errData = await res.json();
+          if (errData?.detail) {
+            errorDetail = errData.detail;
+          } else if (errData?.message) {
+            errorDetail = errData.message;
+          }
+        } catch {
+          const text = await res.text().catch(() => "");
+          if (text) errorDetail = text.slice(0, 100);
+        }
+
+        if (res.status === 401) {
+          alert("로그인 세션이 만료되었습니다. 다시 로그인해 주세요.");
+          router.push("/login");
+          return;
+        }
+
+        alert(`생성 요청 실패: ${errorDetail}`);
+        return;
+      }
+
       const data = await res.json();
-      if (data.job_id) {
+      if (data?.job_id) {
         startTask(data.job_id);
       } else {
-        alert("생성 시작에 실패했습니다.");
+        alert("생성 시작에 실패했습니다. (Job ID가 생성되지 않음)");
       }
-    } catch (e) {
-      console.error(e);
-      alert("서버 오류가 발생했습니다.");
+    } catch (e: any) {
+      console.error("Guide start failed:", e);
+      alert(`서버 연결 오류가 발생했습니다: ${e?.message || "네트워크 상태를 확인해주세요."}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -140,14 +164,15 @@ export default function Home() {
       });
       
       if (res.ok) {
-        setHistory(prev => prev.filter(item => item.id !== deleteTarget.id));
+        setHistory(prev => prev.filter(item => item?.id !== deleteTarget.id));
         setDeleteTarget(null);
       } else {
-        alert("가이드 삭제에 실패했습니다.");
+        const err = await res.json().catch(() => ({}));
+        alert(`가이드 삭제에 실패했습니다: ${err?.detail || err?.message || res.statusText}`);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error("Failed to delete", e);
-      alert("서버 오류가 발생했습니다.");
+      alert(`삭제 중 오류가 발생했습니다: ${e?.message || "네트워크 상태를 확인해주세요."}`);
     } finally {
       setIsDeleting(false);
     }
