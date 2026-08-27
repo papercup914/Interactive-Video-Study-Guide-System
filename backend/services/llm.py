@@ -6,8 +6,17 @@ import math
 from google import genai
 from google.genai import types
 from typing import List, Any, Optional
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 from pydantic import BaseModel, Field
+
+def _should_retry_error(exception: BaseException) -> bool:
+    """인증 오류나 설정 누락은 재시도하지 않고 즉시 Fallback으로 넘깁니다."""
+    err_str = str(exception).lower()
+    if "authentication" in err_str or "401" in err_str or "api_key" in err_str or "invalid_api_key" in err_str or "incorrect api key" in err_str:
+        return False
+    if isinstance(exception, (ValueError, ImportError)):
+        return False
+    return True
 
 def get_gemini_client():
     api_key = os.getenv("GEMINI_API_KEY")
@@ -285,7 +294,7 @@ def generate_outline(context_data: str, provider: str, url_hash: str, length_pre
         )
         return response.text
 
-    @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=30))
+    @retry(retry=retry_if_exception(_should_retry_error), stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=30))
     def _call_openai_outline(target_provider="OpenAI (GPT-4o)"):
         target_model = target_provider
         if target_provider == "OpenAI (GPT-4o)":
@@ -529,7 +538,7 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
             )
             return response.text
 
-    @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=30))
+    @retry(retry=retry_if_exception(_should_retry_error), stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=30))
     def _call_openai_with_retry(target_provider="OpenAI (GPT-4o)"):
         target_model = target_provider
         if target_provider == "OpenAI (GPT-4o)":

@@ -29,7 +29,7 @@ type HistoryItem = {
 export default function Home() {
   const router = useRouter();
   const [url, setUrl] = useState("");
-  const [provider, setProvider] = useState("nvidia/nemotron-3-ultra-550b-a55b");
+  const [provider, setProvider] = useState("google/gemini-2.5-flash");
   const [lengthPreset, setLengthPreset] = useState("Auto");
   const [analogyPreset, setAnalogyPreset] = useState("Auto");
   const [showAdvanced, setShowAdvanced] = useState(false);
