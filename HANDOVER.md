@@ -11,11 +11,22 @@
 | **Frontend** | Next.js 16.2.10 (App Router), React 19.2.4, Tailwind CSS v4 | **Vercel**: `https://interactive-video-study-guide-syste.vercel.app` | 🟢 라이브 가동 중 |
 | **Backend** | FastAPI (Python 3.12), Celery, Redis | **AWS EC2 (Free Tier)**: `http://13.209.73.143:8000` | 🟢 200 OK 가동 중 |
 | **Auth & DB** | Supabase Auth (Google OAuth, JWT 쿠키 세션, Edge Guard) | **Supabase Cloud**: `https://app.notion.com/...` | 🟢 연동 완료 |
-| **AI Engine** | Google GenAI SDK (Gemini 3.1 Flash-Lite) | BYOK / Cloudflare Tunnel / Direct REST | 🟢 정상 연동 |
+| **AI Engine** | Google GenAI SDK (Gemini 3.6 Flash) | BYOK / Cloudflare Tunnel / Direct REST | 🟢 정상 연동 (E2E 검증 완료) |
+| **Worker & Queue** | Celery 5.6, Redis 8.1 | AWS EC2 (Single-Worker Concurrency 3) | 🟢 안정적 비동기 처리 |
 
 ---
 
-## 2. 구현 완료된 핵심 기능 (Verified Features)
+## 2. 구현 및 버그 해결 완료 내역 (Verified Features)
+
+### ✅ 가이드 생성 서버 오류 완전 해결 (E2E 실기 검증 100% 완료)
+1. **Celery/Redis 브로커 통신 복구**: `REDIS_URL` 환경변수 폴백 및 `docker-compose.yml` Celery 브로커 환경변수 명시.
+2. **Next.js 미들웨어 API 307 충돌 해결**: API 요청(`/api/...`) 미인증 시 307 HTML 리다이렉트 대신 401 JSON을 반환하도록 개선하고, 프론트엔드 에러 파싱 및 alert 방어 로직 강화.
+3. **오디오 다운로드 ffmpeg 설치**: `Dockerfile.backend`에 `ffmpeg`를 추가하여 자막이 없는 영상도 100% 오디오 추출 및 Gemini STT 변환 지원.
+4. **Gemini 3.6 Flash 모델 업그레이드 & Fallback 강화**:
+   - Google 공식 지원 모델인 `gemini-3.6-flash`로 전면 교체.
+   - `is_gemini_provider` 헬퍼를 통해 프론트엔드/백엔드 provider 판별 일원화.
+   - OpenAI API 키 만료/부재 시 401 에러 즉시 감지 후 지체 없이 Gemini로 자동 Fallback 처리.
+   - Gemini 분당 요청 한도(RPM) 고려하여 비동기 챕터 생성 동시성 한도를 3으로 최적화.
 
 ### ✅ Supabase Auth & Security System (프로덕션 라이브 & 모바일 검증 완료)
 - **Google 1클릭 로그인 & 이메일 가입**: `frontend/src/app/login/page.tsx`
@@ -26,7 +37,7 @@
   - `Redirect URLs`: `https://interactive-video-study-guide-syste.vercel.app/auth/callback`, `https://interactive-video-study-guide-syste.vercel.app/**`
 
 ### ✅ Guide Mode (가이드 모드)
-- 유튜브 URL 입력 ➡️ `video.py` / `youtube-transcript-api` 자막 추출 ➡️ `llm.py` Gemini 호출 ➡️ 마크다운 학습서 & 퀴즈 실시간 생성.
+- 유튜브 URL 입력 ➡️ 자막/오디오 추출 ➡️ Gemini 3.6 Flash 기반 목차 및 7개 챕터/퀴즈/Feynman 비유 완벽 생성 (`backend/routers/guide.py`).
 
 ### ✅ Discussion Mode (토론 모드)
 - 학습서 본문 텍스트 드래그/하이라이트 ➡️ 소크라테스식 AI 튜터 챗팅 (`backend/routers/discussion.py`).
