@@ -9,6 +9,8 @@ from youtube_transcript_api import YouTubeTranscriptApi
 TMP_DIR = "backend/tmp"
 
 COOKIE_PATHS = [
+    "backend/data/cookies.txt",
+    "/app/backend/data/cookies.txt",
     "backend/cookies.txt",
     "/app/backend/cookies.txt",
     "cookies.txt",
@@ -16,22 +18,31 @@ COOKIE_PATHS = [
 ]
 
 def _ensure_dir_exists():
-    if not os.path.exists(TMP_DIR):
-        os.makedirs(TMP_DIR)
+    try:
+        if not os.path.exists(TMP_DIR):
+            os.makedirs(TMP_DIR, exist_ok=True)
+    except Exception as e:
+        print(f"[VideoService] Error creating temp dir: {e}")
 
 def get_cookie_file() -> str | None:
     """존재하는 cookies.txt 경로를 반환하거나 환경변수에서 로드합니다."""
     for p in COOKIE_PATHS:
-        if os.path.exists(p) and os.path.getsize(p) > 0:
-            return p
+        try:
+            if os.path.exists(p) and os.path.isfile(p) and os.path.getsize(p) > 0:
+                return p
+        except Exception:
+            continue
             
     cookies_text = os.getenv("YOUTUBE_COOKIES_TEXT")
     if cookies_text and len(cookies_text.strip()) > 0:
         target = os.path.join(TMP_DIR, "env_cookies.txt")
         _ensure_dir_exists()
-        with open(target, "w", encoding="utf-8") as f:
-            f.write(cookies_text.strip())
-        return target
+        try:
+            with open(target, "w", encoding="utf-8") as f:
+                f.write(cookies_text.strip())
+            return target
+        except Exception as e:
+            print(f"[VideoService] Error writing env_cookies.txt: {e}")
     return None
 
 def get_transcript_session(cookie_file: str | None = None) -> requests.Session:
@@ -72,7 +83,7 @@ def download_audio(url: str) -> str:
     cookie_file = get_cookie_file()
     
     ydl_opts = {
-        'format': 'bestaudio/best',
+        'format': 'ba/b/bestaudio/best',
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
@@ -81,6 +92,12 @@ def download_audio(url: str) -> str:
         'outtmpl': outtmpl,
         'quiet': True,
         'no_warnings': True,
+        'js_runtimes': {'node': {}},
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['mweb', 'web', 'android', 'ios']
+            }
+        },
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
             'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
@@ -111,6 +128,12 @@ def get_video_metadata(url: str) -> dict:
         'quiet': True,
         'no_warnings': True,
         'extract_flat': True,
+        'js_runtimes': {'node': {}},
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['mweb', 'web', 'android', 'ios']
+            }
+        },
     }
     if cookie_file:
         ydl_opts['cookiefile'] = cookie_file

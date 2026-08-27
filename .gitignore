@@ -23,6 +23,11 @@ backend/tmp/
 tmp/
 *.sqlite3
 *.db
+*cookies.txt
+cookies.txt
+backend/cookies.txt
+backend/data/cookies.txt
+backend/tmp/env_cookies.txt
 
 # Frontend
 frontend/node_modules/

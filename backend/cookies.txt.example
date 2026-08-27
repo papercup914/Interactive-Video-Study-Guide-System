@@ -1,0 +1,15 @@
+﻿# Netscape HTTP Cookie File
+# http://curl.haxx.se/rfc/cookie_spec.html
+# This is a generated file!  Do not edit.
+#
+# [안내] 
+# 이 파일은 유튜브 봇 차단(Bot Detection) 우회를 위한 cookies.txt 템플릿 예시입니다.
+# 실제 사용 시에는 이 파일을 'backend/data/cookies.txt' 또는 'backend/cookies.txt'로 복사한 뒤,
+# 크롬 확장프로그램('Get cookies.txt LOCALLY') 등을 통해 추출한 본인의 '일회용 부계정' 쿠키 내용으로 교체해주세요.
+#
+# 형식 예시:
+# .youtube.com	TRUE	/	TRUE	1798765432	GPS	1
+# .youtube.com	TRUE	/	TRUE	1798765432	YSC	xXxXxXxXxXx
+# .youtube.com	TRUE	/	TRUE	1798765432	VISITOR_INFO1_LIVE	yYyYyYyYyYy
+# .youtube.com	TRUE	/	TRUE	1798765432	__Secure-3PAPISID	zZzZzZzZzZz
+# .youtube.com	TRUE	/	TRUE	1798765432	__Secure-3PSID	wWwWwWwWwWw

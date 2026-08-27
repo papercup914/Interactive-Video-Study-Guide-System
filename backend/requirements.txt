@@ -20,3 +20,4 @@ sqlalchemy
 certifi
 python-multipart
 openai
+yt-dlp-ejs
