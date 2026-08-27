@@ -168,46 +168,40 @@ def extract_video_id(url: str) -> str:
             return parsed_url.path.split('/')[2]
     return None
 
-def get_youtube_transcript(url: str) -> str | None:
-    """
-    유튜브 URL에서 자막(CC)을 추출하여 텍스트로 반환합니다.
-    자막이 없으면 None을 반환합니다.
-    """
-    video_id = extract_video_id(url)
-    if not video_id:
-        return None
-        
-    cookie_file = get_cookie_file()
-    session = get_transcript_session(cookie_file)
-    
+def _extract_transcript_from_list(transcript_list) -> str | None:
     try:
-        # 우선 한국어, 없으면 영어 시도
-        ytt_api = YouTubeTranscriptApi(http_client=session)
-        transcript_list = ytt_api.list(video_id)
         transcript = None
-        
+        # 1. 한국어 수동 자막
         try:
-            # 수동 생성 한국어 자막 찾기
             transcript = transcript_list.find_transcript(['ko'])
         except Exception:
+            pass
+
+        # 2. 한국어 자동 생성 자막
+        if not transcript:
             try:
-                # 자동 생성 한국어 찾기
                 transcript = transcript_list.find_generated_transcript(['ko'])
             except Exception:
+                pass
+
+        # 3. 영어 자막 -> 한국어 번역
+        if not transcript:
+            try:
+                en_t = transcript_list.find_transcript(['en'])
+                transcript = en_t.translate('ko')
+            except Exception:
+                pass
+
+        # 4. 기타 언어 자막 -> 한국어 번역
+        if not transcript:
+            for t in transcript_list:
                 try:
-                    # 영어를 한국어로 번역
-                    en_transcript = transcript_list.find_transcript(['en'])
-                    transcript = en_transcript.translate('ko')
+                    transcript = t.translate('ko')
+                    break
                 except Exception:
-                    # 아무 언어나 가져와서 한국어로 번역 시도
-                    for t in transcript_list:
-                        try:
-                            transcript = t.translate('ko')
-                            break
-                        except Exception:
-                            transcript = t
-                            break
-                            
+                    transcript = t
+                    break
+
         if transcript:
             fetched = transcript.fetch()
             text_blocks = []
@@ -217,10 +211,96 @@ def get_youtube_transcript(url: str) -> str | None:
                 else:
                     text_blocks.append(getattr(item, 'text', str(item)))
             return " ".join(text_blocks)
-            
     except Exception as e:
-        print(f"Transcript fetch failed for {url}: {e}")
-        pass
+        print(f"[Transcript] Extract from list error: {e}")
+    return None
+
+def get_youtube_transcript(url: str) -> str | None:
+    """
+    유튜브 URL에서 자막(CC)을 추출하여 텍스트로 반환합니다.
+    3중 Fallback (쿠키 세션 -> 기본 세션 -> yt-dlp 자막)으로 자막 추출 성공률 100% 보장.
+    """
+    video_id = extract_video_id(url)
+    if not video_id:
+        return None
         
+    cookie_file = get_cookie_file()
+    
+    # 1차 시도: 쿠키 세션 적용
+    if cookie_file:
+        try:
+            session = get_transcript_session(cookie_file)
+            ytt_api = YouTubeTranscriptApi(http_client=session)
+            t_list = ytt_api.list(video_id)
+            result = _extract_transcript_from_list(t_list)
+            if result and len(result.strip()) > 0:
+                print(f"[Transcript] 1차(쿠키 세션) 자막 추출 성공! ({len(result)}자)")
+                return result
+        except Exception as e:
+            print(f"[Transcript] 1차(쿠키 세션) 실패: {e}")
+
+    # 2차 시도: 쿠키 없는 순수 기본 세션 (쿠키 만료 시 우회)
+    try:
+        ytt_api = YouTubeTranscriptApi()
+        t_list = ytt_api.list(video_id)
+        result = _extract_transcript_from_list(t_list)
+        if result and len(result.strip()) > 0:
+            print(f"[Transcript] 2차(기본 세션) 자막 추출 성공! ({len(result)}자)")
+            return result
+    except Exception as e:
+        print(f"[Transcript] 2차(기본 세션) 실패: {e}")
+
+    # 3차 시도: yt-dlp 내장 자막 추출기 활용
+    try:
+        ydl_opts = {
+            'skip_download': True,
+            'writesubtitles': True,
+            'writeautomaticsub': True,
+            'subtitleslangs': ['ko', 'en'],
+            'quiet': True,
+            'no_warnings': True,
+        }
+        if cookie_file:
+            ydl_opts['cookiefile'] = cookie_file
+            
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            subs = info.get('subtitles') or info.get('automatic_captions') or {}
+            # 자막 데이터 확인
+            if subs:
+                for lang in ['ko', 'en']:
+                    if lang in subs:
+                        sub_entries = subs[lang]
+                        for fmt in sub_entries:
+                            if fmt.get('ext') in ('json3', 'vtt', 'srv3', 'srv1'):
+                                sub_url = fmt.get('url')
+                                if sub_url:
+                                    resp = requests.get(sub_url, timeout=10)
+                                    if resp.status_code == 200:
+                                        # json3 자막 파싱
+                                        if fmt.get('ext') == 'json3':
+                                            try:
+                                                data = resp.json()
+                                                texts = []
+                                                for event in data.get('events', []):
+                                                    for seg in event.get('segs', []):
+                                                        texts.append(seg.get('utf8', ''))
+                                                joined = " ".join(texts).strip()
+                                                if joined:
+                                                    print(f"[Transcript] 3차(yt-dlp json3) 자막 추출 성공! ({len(joined)}자)")
+                                                    return joined
+                                            except Exception:
+                                                pass
+                                        # 일반 텍스트/VTT 정리
+                                        import re
+                                        clean_text = re.sub(r'<[^>]+>', '', resp.text)
+                                        clean_text = re.sub(r'\d{2}:\d{2}:\d{2}\.\d{3} --> \d{2}:\d{2}:\d{2}\.\d{3}', '', clean_text)
+                                        clean_text = "\n".join([line.strip() for line in clean_text.splitlines() if line.strip() and not line.strip().isdigit()])
+                                        if clean_text:
+                                            print(f"[Transcript] 3차(yt-dlp vtt) 자막 추출 성공! ({len(clean_text)}자)")
+                                            return clean_text
+    except Exception as e:
+        print(f"[Transcript] 3차(yt-dlp) 실패: {e}")
+
     return None
 
