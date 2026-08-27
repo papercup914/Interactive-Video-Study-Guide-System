@@ -42,6 +42,15 @@ def get_or_create_document_cache(file_name: str, model_id: str):
     return cache.name
 
 
+def is_gemini_provider(provider: str = None) -> bool:
+    """
+    주어진 provider 문자열이 Gemini 계열인지 확인합니다.
+    """
+    if not provider:
+        return True
+    p = str(provider).lower().strip()
+    return "gemini" in p or "google" in p or p == "default"
+
 def get_openai_client(provider: str = None):
     api_key = None
     base_url = os.getenv("OPENAI_BASE_URL")
@@ -134,9 +143,9 @@ def process_audio(audio_path: str, provider: str) -> str:
     transcript = ""
     whisper_done = False
 
-    # OpenAI 계열 (Whisper) 우선 시도
+    # OpenAI 계열 (Whisper) 우선 시도 (Gemini가 명시된 경우 제외)
     openai_key = os.getenv("OPENAI_API_KEY")
-    if openai_key and openai_key != "여기에_OPENAI_API_키를_입력하세요" and provider != "Google Gemini":
+    if openai_key and openai_key != "여기에_OPENAI_API_키를_입력하세요" and not is_gemini_provider(provider):
         try:
             client = get_openai_client("OpenAI (GPT-4o)")
             chunk_paths = _split_audio_if_needed(audio_path, max_size_mb=20)
@@ -301,14 +310,22 @@ def generate_outline(context_data: str, provider: str, url_hash: str, length_pre
         )
         return response.choices[0].message.content
 
-    if provider == "Google Gemini":
+    if is_gemini_provider(provider):
         try:
             outline_raw = _call_gemini_outline()
         except Exception as e:
             print(f"[Harness Fallback] Gemini failed outline generation: {e}. Switching to Fallback.")
-            outline_raw = _call_openai_outline("OpenAI (GPT-4o)")
+            try:
+                outline_raw = _call_openai_outline("OpenAI (GPT-4o)")
+            except Exception as e2:
+                print(f"[Harness Error] Both Gemini and OpenAI outline failed: {e2}")
+                outline_raw = "{}"
     else:
-        outline_raw = _call_openai_outline(provider)
+        try:
+            outline_raw = _call_openai_outline(provider)
+        except Exception as e:
+            print(f"[Harness Fallback] OpenAI outline failed: {e}. Switching to Gemini Fallback.")
+            outline_raw = _call_gemini_outline()
         
     try:
         parsed_json = json.loads(outline_raw)
@@ -531,15 +548,22 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
         return response.choices[0].message.content
 
     def _call_api():
-        if provider == "Google Gemini":
+        if is_gemini_provider(provider):
             try:
                 return _call_gemini_with_retry()
             except Exception as e:
                 print(f"[Harness Fallback] Gemini failed after retries: {e}. Switching to Fallback model (GPT-4o).")
-                # Fallback to GPT-4o
-                return _call_openai_with_retry("OpenAI (GPT-4o)")
+                try:
+                    return _call_openai_with_retry("OpenAI (GPT-4o)")
+                except Exception as e2:
+                    print(f"[Harness Error] Both Gemini and OpenAI chapter generation failed: {e2}")
+                    raise e
         else:
-            return _call_openai_with_retry(provider)
+            try:
+                return _call_openai_with_retry(provider)
+            except Exception as e:
+                print(f"[Harness Fallback] OpenAI failed after retries: {e}. Switching to Fallback model (Gemini).")
+                return _call_gemini_with_retry()
 
     result = await loop.run_in_executor(None, _call_api)
     
@@ -582,13 +606,26 @@ def generate_answer(selected_text: str, context: str, question: str, provider: s
     3. **(중요)** "안녕하세요", "좋은 질문입니다" 같은 인사말이나 불필요한 서론을 절대 쓰지 마세요. 곧바로 답변(본론)부터 시작하세요.
     """
     
-    if provider == "Google Gemini":
-        client = get_gemini_client()
-        response = client.models.generate_content(
-            model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
-            contents=[prompt]
-        )
-        return response.text
+    if is_gemini_provider(provider):
+        try:
+            client = get_gemini_client()
+            response = client.models.generate_content(
+                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
+                contents=[prompt]
+            )
+            return response.text
+        except Exception as e:
+            print(f"[Harness Fallback] Gemini answer failed: {e}. Switching to OpenAI.")
+            target_model = "gpt-4o"
+            client = get_openai_client("OpenAI (GPT-4o)")
+            response = client.chat.completions.create(
+                model=target_model,
+                messages=[
+                    {"role": "system", "content": "당신은 본문 내용을 바탕으로 독자의 질문에 친절하게 답변하는 사고 파트너입니다."},
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            return response.choices[0].message.content
     else:
         target_model = provider
         if provider == "OpenAI (GPT-4o)":
@@ -596,15 +633,24 @@ def generate_answer(selected_text: str, context: str, question: str, provider: s
         elif provider == "cerebras/gpt-oss-120b":
             target_model = "gpt-oss-120b"
             
-        client = get_openai_client(provider)
-        response = client.chat.completions.create(
-            model=target_model,
-            messages=[
-                {"role": "system", "content": "당신은 본문 내용을 바탕으로 독자의 질문에 친절하게 답변하는 사고 파트너입니다."},
-                {"role": "user", "content": prompt}
-            ]
-        )
-        return response.choices[0].message.content
+        try:
+            client = get_openai_client(provider)
+            response = client.chat.completions.create(
+                model=target_model,
+                messages=[
+                    {"role": "system", "content": "당신은 본문 내용을 바탕으로 독자의 질문에 친절하게 답변하는 사고 파트너입니다."},
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            print(f"[Harness Fallback] OpenAI answer failed: {e}. Switching to Gemini.")
+            client = get_gemini_client()
+            response = client.models.generate_content(
+                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
+                contents=[prompt]
+            )
+            return response.text
 
 def translate_title(title: str, provider: str) -> str:
     """
@@ -621,7 +667,7 @@ def translate_title(title: str, provider: str) -> str:
     """
     
     try:
-        if provider == "Google Gemini":
+        if is_gemini_provider(provider):
             client = get_gemini_client()
             response = client.models.generate_content(
                 model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
@@ -635,15 +681,23 @@ def translate_title(title: str, provider: str) -> str:
             elif provider == "cerebras/gpt-oss-120b":
                 target_model = "gpt-oss-120b"
             
-            client = get_openai_client(provider)
-            response = client.chat.completions.create(
-                model=target_model,
-                messages=[
-                    {"role": "system", "content": "오직 번역된 제목 텍스트만 반환합니다."},
-                    {"role": "user", "content": prompt}
-                ]
-            )
-            return response.choices[0].message.content.strip().strip('"')
+            try:
+                client = get_openai_client(provider)
+                response = client.chat.completions.create(
+                    model=target_model,
+                    messages=[
+                        {"role": "system", "content": "오직 번역된 제목 텍스트만 반환합니다."},
+                        {"role": "user", "content": prompt}
+                    ]
+                )
+                return response.choices[0].message.content.strip().strip('"')
+            except Exception:
+                client = get_gemini_client()
+                response = client.models.generate_content(
+                    model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
+                    contents=[prompt]
+                )
+                return response.text.strip().strip('"')
     except Exception as e:
         print(f"Title translation failed: {str(e)}")
         return title # 실패 시 원본 반환
@@ -661,7 +715,7 @@ def extract_image_keyword(title: str, provider: str) -> str:
     """
     
     try:
-        if provider == "Google Gemini":
+        if is_gemini_provider(provider):
             client = get_gemini_client()
             response = client.models.generate_content(
                 model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
@@ -671,16 +725,25 @@ def extract_image_keyword(title: str, provider: str) -> str:
             return keyword if keyword else "study"
         else:
             target_model = "gpt-4o" if provider == "OpenAI (GPT-4o)" else provider
-            client = get_openai_client(provider)
-            response = client.chat.completions.create(
-                model=target_model,
-                messages=[
-                    {"role": "system", "content": "Output only English keywords for image search."},
-                    {"role": "user", "content": prompt}
-                ]
-            )
-            keyword = response.choices[0].message.content.strip().replace('"', '')
-            return keyword if keyword else "study"
+            try:
+                client = get_openai_client(provider)
+                response = client.chat.completions.create(
+                    model=target_model,
+                    messages=[
+                        {"role": "system", "content": "Output only English keywords for image search."},
+                        {"role": "user", "content": prompt}
+                    ]
+                )
+                keyword = response.choices[0].message.content.strip().replace('"', '')
+                return keyword if keyword else "study"
+            except Exception:
+                client = get_gemini_client()
+                response = client.models.generate_content(
+                    model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
+                    contents=[prompt]
+                )
+                keyword = response.text.strip().replace('"', '')
+                return keyword if keyword else "study"
     except Exception as e:
         print(f"Keyword extraction failed: {str(e)}")
         return "study"
@@ -713,7 +776,7 @@ def profile_content(context_data: str, provider: str) -> dict:
     """
     
     try:
-        if provider == "Google Gemini":
+        if is_gemini_provider(provider):
             client = get_gemini_client()
             response = client.models.generate_content(
                 model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
@@ -721,16 +784,24 @@ def profile_content(context_data: str, provider: str) -> dict:
             )
             raw_text = response.text.strip()
         else:
-            client = get_openai_client(provider)
-            target_model = "gpt-4o-mini" if provider == "OpenAI (GPT-4o)" else provider
-            response = client.chat.completions.create(
-                model=target_model,
-                messages=[
-                    {"role": "system", "content": "Output valid JSON only."},
-                    {"role": "user", "content": prompt}
-                ]
-            )
-            raw_text = response.choices[0].message.content.strip()
+            try:
+                client = get_openai_client(provider)
+                target_model = "gpt-4o-mini" if provider == "OpenAI (GPT-4o)" else provider
+                response = client.chat.completions.create(
+                    model=target_model,
+                    messages=[
+                        {"role": "system", "content": "Output valid JSON only."},
+                        {"role": "user", "content": prompt}
+                    ]
+                )
+                raw_text = response.choices[0].message.content.strip()
+            except Exception:
+                client = get_gemini_client()
+                response = client.models.generate_content(
+                    model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.1-flash-lite"),
+                    contents=[prompt]
+                )
+                raw_text = response.text.strip()
             
         if raw_text.startswith("```json"):
             raw_text = raw_text[7:]
