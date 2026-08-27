@@ -10,7 +10,7 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
     # This is a port of the old `_generate_guide_task` from guide.py
     from backend.services.job_manager import update_job_status, finish_job, fail_job, get_job, save_study_guide, get_completed_chapters, save_chapter_checkpoint
     from backend.services.video import download_audio, get_youtube_transcript, get_url_hash, get_video_metadata
-    from backend.services.llm import process_audio, generate_outline, async_generate_chapter_content, profile_content, translate_title
+    from backend.services.llm import process_audio, generate_outline, async_generate_chapter_content, profile_content, translate_title, is_gemini_provider
     from backend.services.source import extract_text_from_pdf, extract_text_from_web
     
     start_time = time.time()
@@ -100,7 +100,7 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
         master_summary = transcript
         
         # 앱 토큰 절감 방안: Gemini Context Caching 도입
-        if provider == "Google Gemini":
+        if is_gemini_provider(provider):
             from backend.services.llm import get_gemini_client
             try:
                 update_job_status(job_id, "uploading_cache", "Gemini Context Caching을 위해 텍스트 업로드 중...")
