@@ -32,23 +32,29 @@ def get_or_create_document_cache(file_name: str, model_id: str):
     This reduces input token costs by 75%+ for subsequent queries.
     """
     if file_name in _gemini_cache_map:
+        if _gemini_cache_map[file_name] is None:
+            raise ValueError("이전 시도에서 Context Cache 생성이 지원되지 않음(토큰 수 미달 등)")
         return _gemini_cache_map[file_name]
         
-    client = get_gemini_client()
-    uploaded_file = client.files.get(name=file_name)
-    
-    from google.genai import types
-    cache = client.caches.create(
-        model=model_id,
-        config=types.CreateCachedContentConfig(
-            contents=[uploaded_file],
-            ttl="3600s",
-            display_name=f"cache_{file_name}"
+    try:
+        client = get_gemini_client()
+        uploaded_file = client.files.get(name=file_name)
+        
+        from google.genai import types
+        cache = client.caches.create(
+            model=model_id,
+            config=types.CreateCachedContentConfig(
+                contents=[uploaded_file],
+                ttl="3600s",
+                display_name=f"cache_{file_name}"
+            )
         )
-    )
-    _gemini_cache_map[file_name] = cache.name
-    print(f"[Gemini Cache] Explicit Context Cache created: {cache.name}")
-    return cache.name
+        _gemini_cache_map[file_name] = cache.name
+        print(f"[Gemini Cache] Explicit Context Cache created: {cache.name}")
+        return cache.name
+    except Exception as e:
+        _gemini_cache_map[file_name] = None
+        raise e
 
 
 def is_gemini_provider(provider: str = None) -> bool:

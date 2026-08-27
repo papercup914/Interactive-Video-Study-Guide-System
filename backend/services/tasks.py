@@ -132,7 +132,7 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
         if not force_refresh:
             completed_chapters = get_completed_chapters(job_id)
         
-        concurrency_limit = 10
+        concurrency_limit = 3
         semaphore = asyncio.Semaphore(concurrency_limit)
         
         async def process_section(idx: int, section_title: str):
