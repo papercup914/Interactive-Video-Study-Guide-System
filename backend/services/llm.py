@@ -9,14 +9,73 @@ from typing import List, Any, Optional
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 from pydantic import BaseModel, Field
 
+import re
+
 def _should_retry_error(exception: BaseException) -> bool:
-    """인증 오류나 설정 누락은 재시도하지 않고 즉시 Fallback으로 넘깁니다."""
+    """인증 오류, 결제/크레딧 부족(402), 404(모델 없음), 설정 누락은 재시도하지 않고 즉시 Fallback으로 넘깁니다."""
     err_str = str(exception).lower()
-    if "authentication" in err_str or "401" in err_str or "api_key" in err_str or "invalid_api_key" in err_str or "incorrect api key" in err_str:
+    non_retry_keywords = (
+        "authentication", "401", "api_key", "invalid_api_key", "incorrect api key",
+        "404", "not_found", "model not found", "unsupported",
+        "402", "payment_required", "insufficient_quota", "credit_balance_exhausted", "billing"
+    )
+    if any(k in err_str for k in non_retry_keywords):
         return False
-    if isinstance(exception, (ValueError, ImportError)):
+    if isinstance(exception, (ValueError, ImportError, TypeError)):
         return False
     return True
+
+FALLBACK_GEMINI_MODELS = [
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-flash-lite-latest"
+]
+
+def safe_gemini_generate_content(client, model: str, contents: Any, config: Any = None, max_retries: int = 3):
+    """
+    Google Gemini API 호출 시:
+    1) 일일 무료 할당량(RequestsPerDay)이 소진되면 다음 가용 모델(3.5-flash, 3.5-flash-lite 등)로 즉시 자동 스위칭합니다.
+    2) 분당 한도(RPM) 초과 시 서버가 요구한 대기 시간 동안 대기 후 자동 재시도합니다.
+    """
+    target_model = model or os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.5-flash")
+    candidate_models = [target_model] + [m for m in FALLBACK_GEMINI_MODELS if m != target_model]
+    
+    last_err = None
+    for current_model in candidate_models:
+        for attempt in range(1, max_retries + 1):
+            try:
+                if config is not None:
+                    return client.models.generate_content(model=current_model, contents=contents, config=config)
+                else:
+                    return client.models.generate_content(model=current_model, contents=contents)
+            except Exception as e:
+                err_str = str(e)
+                last_err = e
+                is_quota = "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "quota" in err_str.lower()
+                is_unavailable = "503" in err_str or "404" in err_str or "not_found" in err_str or "unavailable" in err_str.lower()
+                
+                if is_quota or is_unavailable:
+                    # 일일 총량 할당량(Daily Quota) 초과인 경우 대기하지 않고 즉시 다음 가용 모델로 스위칭
+                    if "generaterequestsperday" in err_str.lower() or "free_tier_requests" in err_str.lower() or is_unavailable:
+                        print(f"[Gemini Quota Switch] Model '{current_model}' Daily Quota Exhausted -> Switching to next candidate model...")
+                        break
+                    
+                    # 분당 요청 한도(RPM) 초과인 경우
+                    if attempt < max_retries:
+                        delay_match = re.search(r'retry in (\d+(?:\.\d+)?)s', err_str, re.IGNORECASE)
+                        delay = max(5, int(float(delay_match.group(1))) + 2) if delay_match else min(30, 10 * attempt)
+                        print(f"[Gemini Rate Limit] Model '{current_model}' RPM limit reached. Waiting {delay}s before retry ({attempt}/{max_retries})...")
+                        time.sleep(delay)
+                    else:
+                        print(f"[Gemini Model Fallback] Model '{current_model}' max retries reached -> Switching to next model.")
+                        break
+                else:
+                    raise e
+                    
+    if last_err:
+        raise last_err
 
 def get_gemini_client():
     api_key = os.getenv("GEMINI_API_KEY")
@@ -134,7 +193,7 @@ def _split_audio_if_needed(audio_path: str, max_size_mb: int = 20) -> List[str]:
         
     return chunk_paths
 
-def process_audio(audio_path: str, provider: str) -> str:
+def process_audio(audio_path: str, provider: str, url_hash: Optional[str] = None) -> str:
     """
     선택된 Provider에 맞게 오디오를 처리하여 텍스트 대본(Transcript)을 반환합니다.
     로컬에 이미 캐시된 대본이 있으면 API를 호출하지 않고 캐시를 반환합니다.
@@ -143,12 +202,12 @@ def process_audio(audio_path: str, provider: str) -> str:
     if not audio_path or not os.path.exists(audio_path):
         raise ValueError(f"오디오 파일이 존재하지 않거나 잘못된 경로입니다: {audio_path}")
 
-    url_hash = os.path.splitext(os.path.basename(audio_path))[0]
+    derived_hash = url_hash or os.path.splitext(os.path.basename(audio_path))[0]
     data_dir = "backend/data"
     if not os.path.exists(data_dir):
         os.makedirs(data_dir, exist_ok=True)
         
-    cache_file = os.path.join(data_dir, f"{url_hash}_transcript.txt")
+    cache_file = os.path.join(data_dir, f"{derived_hash}_transcript.txt")
     if os.path.exists(cache_file):
         with open(cache_file, "r", encoding="utf-8") as f:
             cached_text = f.read()
@@ -203,9 +262,10 @@ def process_audio(audio_path: str, provider: str) -> str:
             if uploaded_file.state.name == "FAILED":
                 raise Exception("Gemini 파일 업로드 처리 실패")
                 
-            @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=30))
+            @retry(retry=retry_if_exception(_should_retry_error), stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=30))
             def _call_gemini_audio():
-                return client.models.generate_content(
+                return safe_gemini_generate_content(
+                    client=client,
                     model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.6-flash"),
                     contents=[uploaded_file, "Please provide a complete and highly accurate transcription of this audio in its original language. Do not summarize, format, or skip any parts. Return ONLY the transcribed text."]
                 )
@@ -218,6 +278,15 @@ def process_audio(audio_path: str, provider: str) -> str:
         except Exception as e:
             print(f"Gemini API error during audio processing: {e}")
             raise Exception(f"오디오 변환(Whisper 및 Gemini Fallback) 처리에 실패했습니다: {e}")
+
+    if transcript:
+        try:
+            with open(cache_file, "w", encoding="utf-8") as f:
+                f.write(transcript)
+        except Exception as e:
+            print(f"[Warning] Transcript cache save failed: {e}")
+
+    return transcript
 
     with open(cache_file, "w", encoding="utf-8") as f:
         f.write(transcript)
@@ -278,7 +347,7 @@ def generate_outline(context_data: str, provider: str, url_hash: str, length_pre
     class OutlineSchema(BaseModel):
         sections: List[str] = Field(description="목차 항목들의 리스트 (기호나 번호 없이 순수 제목만 포함)")
 
-    @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=30))
+    @retry(retry=retry_if_exception(_should_retry_error), stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=30))
     def _call_gemini_outline():
         client = get_gemini_client()
         config = types.GenerateContentConfig(
@@ -293,7 +362,8 @@ def generate_outline(context_data: str, provider: str, url_hash: str, length_pre
         else:
             contents_payload = [context_data, prompt]
             
-        response = client.models.generate_content(
+        response = safe_gemini_generate_content(
+            client=client,
             model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.6-flash"),
             contents=contents_payload,
             config=config
@@ -507,7 +577,7 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
     
     loop = asyncio.get_event_loop()
     
-    @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=30))
+    @retry(retry=retry_if_exception(_should_retry_error), stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=30))
     def _call_gemini_with_retry():
         client = get_gemini_client()
         if chunked_context.startswith("GEMINI_FILE_URI::"):
@@ -518,7 +588,8 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
                 # Context Caching 적용 (Option B)
                 cache_name = get_or_create_document_cache(file_name, model_id)
                 from google.genai import types
-                response = client.models.generate_content(
+                response = safe_gemini_generate_content(
+                    client=client,
                     model=model_id,
                     contents=[system_prompt], # System prompt is passed per chapter
                     config=types.GenerateContentConfig(
@@ -530,7 +601,8 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
                 print(f"[Gemini Cache] Failed to use explicit cache: {cache_e}. Falling back to normal upload.")
                 uploaded_file = client.files.get(name=file_name)
                 contents_payload = [uploaded_file, system_prompt]
-                response = client.models.generate_content(
+                response = safe_gemini_generate_content(
+                    client=client,
                     model=model_id,
                     contents=contents_payload
                 )
@@ -538,7 +610,8 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
         else:
             contents_payload = [chunked_context, system_prompt]
             
-            response = client.models.generate_content(
+            response = safe_gemini_generate_content(
+                client=client,
                 model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.6-flash"),
                 contents=contents_payload
             )
@@ -624,7 +697,8 @@ def generate_answer(selected_text: str, context: str, question: str, provider: s
     if is_gemini_provider(provider):
         try:
             client = get_gemini_client()
-            response = client.models.generate_content(
+            response = safe_gemini_generate_content(
+                client=client,
                 model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.6-flash"),
                 contents=[prompt]
             )
@@ -661,7 +735,8 @@ def generate_answer(selected_text: str, context: str, question: str, provider: s
         except Exception as e:
             print(f"[Harness Fallback] OpenAI answer failed: {e}. Switching to Gemini.")
             client = get_gemini_client()
-            response = client.models.generate_content(
+            response = safe_gemini_generate_content(
+                client=client,
                 model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.6-flash"),
                 contents=[prompt]
             )
@@ -684,7 +759,8 @@ def translate_title(title: str, provider: str) -> str:
     try:
         if is_gemini_provider(provider):
             client = get_gemini_client()
-            response = client.models.generate_content(
+            response = safe_gemini_generate_content(
+                client=client,
                 model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.6-flash"),
                 contents=[prompt]
             )
@@ -708,7 +784,8 @@ def translate_title(title: str, provider: str) -> str:
                 return response.choices[0].message.content.strip().strip('"')
             except Exception:
                 client = get_gemini_client()
-                response = client.models.generate_content(
+                response = safe_gemini_generate_content(
+                    client=client,
                     model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.6-flash"),
                     contents=[prompt]
                 )
@@ -732,7 +809,8 @@ def extract_image_keyword(title: str, provider: str) -> str:
     try:
         if is_gemini_provider(provider):
             client = get_gemini_client()
-            response = client.models.generate_content(
+            response = safe_gemini_generate_content(
+                    client=client,
                 model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.6-flash"),
                 contents=[prompt]
             )
@@ -753,7 +831,8 @@ def extract_image_keyword(title: str, provider: str) -> str:
                 return keyword if keyword else "study"
             except Exception:
                 client = get_gemini_client()
-                response = client.models.generate_content(
+                response = safe_gemini_generate_content(
+                    client=client,
                     model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.6-flash"),
                     contents=[prompt]
                 )
@@ -795,7 +874,8 @@ def profile_content(context_data: str, provider: str) -> dict:
         if is_gemini_provider(provider):
             print(f"[DEBUG LLM] Calling Gemini for profiling...")
             client = get_gemini_client()
-            response = client.models.generate_content(
+            response = safe_gemini_generate_content(
+                    client=client,
                 model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.6-flash"),
                 contents=[prompt]
             )
@@ -815,7 +895,8 @@ def profile_content(context_data: str, provider: str) -> dict:
                 raw_text = response.choices[0].message.content.strip()
             except Exception:
                 client = get_gemini_client()
-                response = client.models.generate_content(
+                response = safe_gemini_generate_content(
+                    client=client,
                     model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.6-flash"),
                     contents=[prompt]
                 )

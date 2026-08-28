@@ -9,6 +9,13 @@ import json
 import urllib.request
 import urllib.error
 
+# Windows 콘솔 출력 인코딩 처리
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 def check_endpoint(url: str, description: str) -> bool:
     print(f"[CHECK] Testing {description} ({url})...")
     try:

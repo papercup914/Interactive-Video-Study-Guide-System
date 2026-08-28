@@ -9,91 +9,78 @@
 | 계층 | 기술 스택 | 배포 위치 및 프로덕션 URL | 상태 |
 | :--- | :--- | :--- | :--- |
 | **Frontend** | Next.js 16.2.10 (App Router), React 19.2.4, Tailwind CSS v4 | **Vercel**: `https://interactive-video-study-guide-syste.vercel.app` | 🟢 라이브 가동 중 |
-| **Backend** | FastAPI (Python 3.12), Celery, Redis | **AWS EC2 (Free Tier)**: `http://13.209.73.143:8000` | 🟢 200 OK 가동 중 |
-| **Auth & DB** | Supabase Auth (Google OAuth, JWT 쿠키 세션, Edge Guard) | **Supabase Cloud**: `https://app.notion.com/...` | 🟢 연동 완료 |
-| **AI Engine** | Google GenAI SDK (Gemini 3.6 Flash) | BYOK / Cloudflare Tunnel / Direct REST | 🟢 정상 연동 (E2E 검증 완료) |
-| **Worker & Queue** | Celery 5.6, Redis 8.1 | AWS EC2 (Single-Worker Concurrency 3) | 🟢 안정적 비동기 처리 |
+| **Backend** | FastAPI (Python 3.12/3.13), Celery, Redis, SQLAlchemy | **AWS EC2 (Free Tier)**: `http://13.209.73.143:8000` | 🟢 200 OK 가동 중 |
+| **Auth & DB** | Supabase Auth (Google OAuth, JWT 쿠키 세션, Edge Guard) | **Supabase Cloud / Neon DB** | 🟢 연동 완료 |
+| **AI Engine** | Google GenAI SDK (Gemini 2.5 Flash / 3.6 Flash) | BYOK / Cloudflare Tunnel / Direct REST | 🟢 정상 연동 (E2E 검증 완료) |
+| **Batch Engine** | 로컬 PC 연산 기반 선행 생성 (yt-dlp flat-playlist) | **Local PC (`http://localhost:8000`)** | 🟢 신규 구현 및 실기 검증 완료 |
 
 ---
 
-## 2. 구현 및 버그 해결 완료 내역 (Verified Features)
+## 2. 최근 구현 완료 내역 (Verified Features)
 
-### ✅ 가이드 생성 서버 오류 완전 해결 (E2E 실기 검증 100% 완료)
-1. **Celery/Redis 브로커 통신 복구**: `REDIS_URL` 환경변수 폴백 및 `docker-compose.yml` Celery 브로커 환경변수 명시.
-2. **Next.js 미들웨어 API 307 충돌 해결**: API 요청(`/api/...`) 미인증 시 307 HTML 리다이렉트 대신 401 JSON을 반환하도록 개선하고, 프론트엔드 에러 파싱 및 alert 방어 로직 강화.
-3. **오디오 다운로드 ffmpeg 설치**: `Dockerfile.backend`에 `ffmpeg`를 추가하여 자막이 없는 영상도 100% 오디오 추출 및 Gemini STT 변환 지원.
-4. **Gemini 3.6 Flash 모델 업그레이드 & Fallback 강화**:
-   - Google 공식 지원 모델인 `gemini-3.6-flash`로 전면 교체.
-   - `is_gemini_provider` 헬퍼를 통해 프론트엔드/백엔드 provider 판별 일원화.
-   - OpenAI API 키 만료/부재 시 401 에러 즉시 감지 후 지체 없이 Gemini로 자동 Fallback 처리.
-   - Gemini 분당 요청 한도(RPM) 고려하여 비동기 챕터 생성 동시성 한도를 3으로 최적화.
+### ✅ [NEW] 개발자 전용 유튜브 대량 일괄 사전 생성 & 운영 서버 동기화 시스템
+AWS EC2 Free Tier의 리소스 고갈(OOM/다운)을 방지하기 위해, 개발자 로컬 PC의 하드웨어로 대량 가이드를 선행 생성(Pre-generation)하고 운영 서버로 동기화(Sync)하는 완전한 시스템이 구축되었습니다.
 
-### ✅ Supabase Auth & Security System (프로덕션 라이브 & 모바일 검증 완료)
-- **Google 1클릭 로그인 & 이메일 가입**: `frontend/src/app/login/page.tsx`
-- **Edge Middleware Session Guard**: `frontend/src/middleware.ts` (비인가 사용자 자동 `/login` 리다이렉트)
-- **Header Profile & Auth Widget**: `frontend/src/components/AuthStatusWidget.tsx` (유저 프로필 및 원클릭 로그아웃)
-- **Supabase URL Configuration**:
-  - `Site URL`: `https://interactive-video-study-guide-syste.vercel.app`
-  - `Redirect URLs`: `https://interactive-video-study-guide-syste.vercel.app/auth/callback`, `https://interactive-video-study-guide-syste.vercel.app/**`
+1. **Quota 소모 없는 고속 수집기 (`backend/services/batch_collector.py`)**:
+   - `yt-dlp --flat-playlist` 모드를 사용하여 YouTube Data API의 일일 할당량(10,000 Quota) 소모 없이 채널/재생목록 영상 목록을 초고속 수집.
+   - 쇼츠(Shorts) 영상(60초 이하 또는 `#shorts`) 자동 필터링 및 최대 개수(`max_limit`) 지정 지원.
 
-### ✅ Guide Mode (가이드 모드)
-- 유튜브 URL 입력 ➡️ 자막/오디오 추출 ➡️ Gemini 3.6 Flash 기반 목차 및 7개 챕터/퀴즈/Feynman 비유 완벽 생성 (`backend/routers/guide.py`).
+2. **비디오당 3×3=9개 프리셋 완전 사전 생성 (`backend/services/batch_generator.py`)**:
+   - 비디오당 자막/오디오를 **최초 1회만 다운로드 및 추출**하여 Whisper/다운로드 비용 극소화.
+   - 요약 분량(3종: `핵심 요약`, `적당한 설명`, `아주 상세하게`) × 설명 방식(3종: `비유 없이 담백하게`, `적절한 비유 추가`, `풍부한 비유`) = **총 9개 프리셋**을 연속/병렬 생성하여 DB에 저장.
+   - 사용자가 프론트엔드에서 어떤 옵션을 선택해도 **0초 만에 즉시 렌더링(캐시 히트)**.
+   - 이미 9개 프리셋이 생성된 비디오는 자동 건너뛰기(Skip)하여 불필요한 LLM 비용 방지 (덮어쓰기 옵션 지원).
 
-### ✅ YouTube 봇 차단(Bot Detection) 대응 및 자막 파이프라인
-1. **AWS EC2 IP 차단 원인 규명**: AWS 데이터센터 IP 대역에서 유튜브 요청 시 `Sign in to confirm you're not a bot` 차단 발생.
-2. **쿠키 연동 시스템 구축**: `backend/services/video.py`에 `cookies.txt` 자동 감지 로더(`get_cookie_file`) 및 MozillaCookieJar 세션 연동 구현 완료.
-3. **에러 핸들링 정제**: 봇 차단 발생 시 영문 스택트레이스 대신 사용자 친화적인 한국어 안내 메시지 반환.
-4. **진행 중인 작업**: 무료 쿠키 방식(`cookies.txt`) 등록 또는 직접 텍스트 입력 UI 확장 대기.
+3. **실시간 실행 로그 스트림 & 안전 실행 파이프라인 (`backend/services/job_manager.py`, `backend/routers/admin.py`)**:
+   - 로컬 환경에서 Celery/Redis 워커가 없더라도 FastAPI 내장 비동기 태스크(`asyncio.create_task`)로 즉시 백그라운드 연산이 실행되도록 보장.
+   - 배치 작업에 실시간 로그(`logs` JSON 필드)를 기록하고, 수집 ➡️ 자막 추출 ➡️ 9개 프리셋 생성 ➡️ 완료까지의 과정을 2초 간격 실시간 스트리밍.
 
-### ✅ Discussion Mode (토론 모드)
-- 학습서 본문 텍스트 드래그/하이라이트 ➡️ 소크라테스식 AI 튜터 챗팅 (`backend/routers/discussion.py`).
+4. **AWS 운영 서버 안전 원격 동기화 (`backend/services/sync_service.py`, `backend/routers/admin.py`)**:
+   - 로컬에서 생성 완료된 가이드 데이터를 운영 서버(`POST /api/admin/sync-guide`)로 안전하게 전송.
+   - **`X-Admin-Sync-Key` 시크릿 헤더 인증**으로 비인가 접근을 원천 차단하며, 네트워크 일시 오류 시 **3회 지수 백오프 자동 재시도** 수행.
 
-### ⚠️ Admin Health Dashboard
-- UI (`frontend/src/app/admin/health/page.tsx`): Recharts 기반 시계열/도넛 차트 및 로그 인스펙터.
-
-### ❌ Curriculum Mode (완전 삭제됨)
-- 커리큘럼 모드는 유저 요청으로 완전 삭제되었으므로 존재한다고 가정하지 말 것.
+5. **로컬 관리자 대시보드 & 실시간 터미널 콘솔 (`frontend/src/app/admin/batch/page.tsx`)**:
+   - 눈이 편안하고 가독성이 뛰어난 모던 Slate/White 테마 및 완벽한 드롭다운 텍스트 명도 대비 적용.
+   - 실시간 진행률 바(%), 4대 지표(총 비디오, 완료, 스킵, 실패), 비디오별 9개 프리셋 카운터(`0/9` ➡️ `9/9`).
+   - 하단에 전문 터미널 형태의 **실시간 실행 로그 스트림 콘솔(Live Terminal Console)** 탑재 (자동 스크롤, 레벨별 컬러 배지, 원클릭 로그 복사).
 
 ---
 
-## 3. 백엔드 인프라 최적화 완료 내역 (AWS EC2)
+## 3. 로컬 실행 및 개발 가이드
 
-1. **초경량 도커 컨테이너화 (1.8GB ➡️ 150MB)**:
-   - 미사용 대용량 패키지(`torch`, `transformers`, `chromadb`, `pymupdf`)를 완전 제거하고, 순수 파이썬 `pypdf`, `google-genai`, `yt-dlp`, `celery`, `redis`, `sqlalchemy`, `python-multipart`로 다이어트 완료.
-2. **도커 단일 빌드(Single-Pass) 구조**:
-   - `studyguide-backend:latest` 1회 빌드 후 FastAPI와 Celery Worker가 동일 이미지를 즉시 공유 기동.
-3. **EBS 볼륨 및 메모리 설정**:
-   - AWS EBS 볼륨: 20GB 확장 완료 (Free Tier 매월 30GB 무료 범위 내)
-   - Swap Memory: 1GB 가상 메모리 활성화 완료
+### 백엔드 실행
+Miniconda 파이썬 환경에서 프로젝트 루트 경로(`I:\Interactive Video Study Guide System`)로 이동 후 실행:
+```powershell
+cd "I:\Interactive Video Study Guide System"
+python -m uvicorn backend.main:app --reload --port 8000
+```
 
----
+### 프론트엔드 실행
+```powershell
+cd "I:\Interactive Video Study Guide System\frontend"
+npm run dev
+```
 
-## 4. 환경변수 관리 가이드
-
-### 프론트엔드 (Vercel Environment Variables)
-- `BACKEND_API_URL`: `http://13.209.73.143:8000`
-- `NEXT_PUBLIC_SUPABASE_URL`: Supabase Project URL
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Supabase Public Anon Key
-
-### 백엔드 (AWS EC2 `backend/.env`)
-- `APP_ENV`: `production`
-- `SUPABASE_JWT_SECRET`: Supabase JWT Secret (HS256 서명 검증)
-- `GEMINI_API_KEY`: Google Gemini API Key (Gemini 3.6 Flash 사용)
-- `REDIS_URL`: `redis://redis:6379/0`
-- `CELERY_BROKER_URL`: `redis://redis:6379/0`
-- `CELERY_RESULT_BACKEND`: `redis://redis:6379/0`
-- `SELECTED_GEMINI_VERSION`: `gemini-3.6-flash`
-- `CORS_ORIGINS`: `*`
-- `DISABLE_AUTH`: `false`
-- `YOUTUBE_COOKIES_TEXT`: (선택) Netscape 쿠키 텍스트
+### 브라우저 접속
+- 일괄 사전 생성 대시보드: `http://localhost:3000/admin/batch`
+- 시스템 헬스 모니터: `http://localhost:3000/admin/health`
 
 ---
 
-## 5. 다음 작업(Next Steps) 추천 과제
+## 4. 테스트 검증 완료 내역
 
-1. **유튜브 쿠키 등록 또는 직접 텍스트 입력 UI 탑재**:
-   - 서버의 `backend/cookies.txt`에 일회용 부계정 쿠키를 넣거나, 메인 화면에 유튜브 스크립트/원문 텍스트 직접 입력 탭 추가.
-2. **HTTPS / Cloudflare Tunnel 보안 적용**:
-   - 브라우저 Mixed Content 경고 방지를 위해 백엔드에 무료 Cloudflare Tunnel 또는 Let's Encrypt Nginx SSL 적용.
-3. **대규모 트래픽 대비 분산 아키텍처 준비**:
-   - 트래픽 증가 시 Gemini 종량제 전환 및 Celery 동시성 확대.
+- **백엔드 통합 및 보안 테스트 (`tests/test_batch_pregeneration.py`)**:
+  - `Ran 4 tests in 26.167s, OK` (쇼츠 필터링, DB 라이프사이클, 동기화 보안 인증, API 라우트 검증 100% 통과)
+- **프론트엔드 프로덕션 빌드 (`npm run build`)**:
+  - `✓ Compiled successfully`, 모든 정적 페이지 및 라우트(`/admin/batch`, `/admin/health` 등) 정상 빌드 완료
+
+---
+
+## 5. 다음 대화에서 이어서 진행 가능한 과제
+
+1. **실제 채널/재생목록 일괄 생성 실기 테스트**:
+   - 관리자 페이지(`http://localhost:3000/admin/batch`)에서 실제 유튜브 플레이리스트 URL을 입력하고 9개 프리셋 생성 및 터미널 로그 스트리밍 동작 확인.
+2. **운영 서버(AWS EC2) 환경변수 배포**:
+   - AWS EC2 백엔드의 `.env`에 `ADMIN_SYNC_SECRET=원하는시크릿키` 등록 후, 로컬에서 생성된 데이터를 AWS로 원클릭 푸시 동기화 검증.
+3. **사용자 뷰어 페이지 캐시 연동 고도화**:
+   - 일반 사용자가 가이드 상세 페이지(`frontend/src/app/guide/[jobId]/page.tsx`)에서 요약 분량/비유 프리셋 변경 시, 사전 생성된 9개 프리셋을 즉시 전환 렌더링하는 UX 확인.

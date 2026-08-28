@@ -1,7 +1,9 @@
 'use client';
 
 import React from 'react';
+import Link from 'next/link';
 import { Activity, RefreshCw, Clock, ShieldCheck } from 'lucide-react';
+
 import { useAdminHealth } from '@/hooks/useAdminHealth';
 import { HealthStatCards } from '@/components/admin/HealthStatCards';
 import { ErrorTrendChart } from '@/components/admin/ErrorTrendChart';
@@ -46,10 +48,18 @@ export default function AdminHealthPage() {
           </div>
         </div>
 
-        {/* Time Range Selector & Manual Refresh Button */}
+        {/* Time Range Selector & Tab Navigation */}
         <div className="flex items-center space-x-3 self-start md:self-auto">
+          <Link
+            href="/admin/batch"
+            className="px-3.5 py-1.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-indigo-500/50 text-indigo-400 hover:text-indigo-300 text-xs font-bold transition-all flex items-center gap-1.5"
+          >
+            ⚡ 일괄 사전 생성
+          </Link>
+
           {/* Time Range Selector */}
           <div className="flex items-center p-1 bg-slate-900 border border-slate-800 rounded-xl space-x-1">
+
             <Clock className="w-3.5 h-3.5 text-slate-500 ml-2 mr-1" />
             {timeRanges.map((range) => (
               <button

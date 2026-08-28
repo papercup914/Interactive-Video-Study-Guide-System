@@ -1,6 +1,7 @@
 from fastapi import APIRouter
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
+
 import random
 
 router = APIRouter()
@@ -245,3 +246,147 @@ async def get_admin_health(
         "categoryBreakdown": category_breakdown,
         "logs": filtered_logs,
     }
+
+# ==================== BATCH PRE-GENERATION & SYNC APIS ====================
+
+from pydantic import BaseModel, Field
+from fastapi import Header, HTTPException, BackgroundTasks
+import os
+import uuid
+from backend.services.job_manager import (
+    create_batch_job,
+    get_batch_job,
+    get_all_batch_jobs,
+    get_batch_video_items,
+    cancel_batch_job,
+    upsert_study_guide_from_sync
+)
+from backend.services.tasks import celery_batch_pregenerate_task
+from backend.services.sync_service import sync_batch_to_remote_server
+
+class BatchStartRequest(BaseModel):
+    url: str
+    provider: str = "Google Gemini"
+    max_limit: int = 30
+    exclude_shorts: bool = True
+    force_refresh: bool = False
+    remote_url: Optional[str] = None
+    sync_key: Optional[str] = None
+
+class BatchSyncRequest(BaseModel):
+    remote_url: Optional[str] = None
+    sync_key: Optional[str] = None
+
+class GuideSyncPayload(BaseModel):
+    batch_id: Optional[str] = None
+    video_id: str
+    video_url: str
+    guides: List[dict]
+
+@router.post("/batch/start")
+async def start_batch_pregeneration(req: BatchStartRequest):
+    """유튜브 재생목록 또는 채널에 대한 일괄 사전 생성 작업을 등록하고 백그라운드에서 실행합니다."""
+    if not req.url or not req.url.strip():
+        raise HTTPException(status_code=400, detail="유튜브 채널 또는 재생목록 URL을 입력해주세요.")
+        
+    batch_id = f"batch_{uuid.uuid4().hex[:12]}"
+    
+    # 1. DB에 배치 작업 생성 (운영 서버 URL 및 시크릿 키 포함)
+    create_batch_job(
+        batch_id=batch_id,
+        url=req.url.strip(),
+        provider=req.provider,
+        max_limit=req.max_limit,
+        exclude_shorts=req.exclude_shorts,
+        force_refresh=req.force_refresh,
+        remote_url=req.remote_url.strip() if req.remote_url else None,
+        sync_key=req.sync_key.strip() if req.sync_key else None
+    )
+    
+    # 2. 백그라운드 태스크로 즉시 안전하게 실행
+    import asyncio
+    from backend.services.batch_generator import run_batch_pregeneration_pipeline
+    asyncio.create_task(run_batch_pregeneration_pipeline(batch_id))
+        
+    return {
+        "status": "success",
+        "batch_id": batch_id,
+        "message": "일괄 생성 작업이 시작되었습니다."
+    }
+
+
+@router.get("/batch/{batch_id}")
+async def get_batch_detail(batch_id: str):
+    """특정 배치 작업의 진행 상황 및 영상별 상태 목록을 조회합니다."""
+    batch = get_batch_job(batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail="배치 작업을 찾을 수 없습니다.")
+        
+    videos = get_batch_video_items(batch_id)
+    return {
+        "batch": batch,
+        "videos": videos
+    }
+
+@router.get("/batch/list/all")
+async def list_all_batches():
+    """모든 일괄 사전 생성 배치 목록을 반환합니다."""
+    batches = get_all_batch_jobs()
+    return {"batches": batches}
+
+@router.post("/batch/{batch_id}/cancel")
+async def cancel_batch(batch_id: str):
+    """진행 중인 배치 작업을 중단(취소)합니다."""
+    batch = get_batch_job(batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail="배치 작업을 찾을 수 없습니다.")
+        
+    cancel_batch_job(batch_id)
+    return {"status": "success", "message": "배치 작업이 취소되었습니다."}
+
+@router.post("/batch/{batch_id}/sync")
+async def manual_sync_batch(batch_id: str, req: BatchSyncRequest = BatchSyncRequest()):
+    """완료된 배치 가이드 데이터를 운영 서버로 수동 동기화(푸시)합니다."""
+    batch = get_batch_job(batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail="배치 작업을 찾을 수 없습니다.")
+        
+    result = await sync_batch_to_remote_server(
+        batch_id=batch_id,
+        remote_url=req.remote_url,
+        sync_key=req.sync_key
+    )
+    return result
+
+@router.post("/sync-guide")
+async def receive_synced_guides(
+    payload: GuideSyncPayload,
+    x_admin_sync_key: Optional[str] = Header(None, alias="X-Admin-Sync-Key")
+):
+    """
+    [운영 서버 전용 수신 엔드포인트]
+    로컬 PC에서 전송한 사전 생성 StudyGuide 데이터를 검증 후 DB에 Upsert 등록합니다.
+    """
+    expected_secret = os.getenv("ADMIN_SYNC_SECRET", "").strip()
+    if not expected_secret:
+        # 시크릿 키가 서버에 설정되어 있지 않으면 보안을 위해 거절
+        raise HTTPException(status_code=500, detail="운영 서버에 ADMIN_SYNC_SECRET이 설정되지 않았습니다.")
+        
+    if not x_admin_sync_key or x_admin_sync_key.strip() != expected_secret:
+        raise HTTPException(status_code=403, detail="유효하지 않은 X-Admin-Sync-Key 인증 헤더입니다.")
+        
+    if not payload.guides or len(payload.guides) == 0:
+        return {"status": "ok", "synced_count": 0}
+        
+    success_count = 0
+    for guide in payload.guides:
+        if upsert_study_guide_from_sync(guide):
+            success_count += 1
+            
+    return {
+        "status": "success",
+        "video_id": payload.video_id,
+        "synced_count": success_count,
+        "total_received": len(payload.guides)
+    }
+

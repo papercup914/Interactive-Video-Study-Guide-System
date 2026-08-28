@@ -40,3 +40,45 @@ class StudyGuide(Base):
     analogy_preset = Column(String, nullable=True)
     video_duration = Column(String, nullable=True)
     notes = Column(Text, nullable=True, default="[]") # JSON string
+
+class BatchJob(Base):
+    __tablename__ = "batch_jobs"
+    
+    id = Column(String, primary_key=True, index=True)
+    url = Column(String)
+    title = Column(String, nullable=True)
+    total_videos = Column(Integer, default=0)
+    completed_videos = Column(Integer, default=0)
+    failed_videos = Column(Integer, default=0)
+    skipped_videos = Column(Integer, default=0)
+    status = Column(String, default="pending") # pending, collecting, processing, completed, failed, cancelled
+    sync_status = Column(String, default="idle") # idle, syncing, synced, failed
+    sync_error = Column(Text, nullable=True)
+    provider = Column(String, nullable=True)
+    force_refresh = Column(Integer, default=0)
+    exclude_shorts = Column(Integer, default=1)
+    max_limit = Column(Integer, default=30)
+    error = Column(Text, nullable=True)
+    logs = Column(Text, nullable=True, default="[]") # JSON list of log items
+    remote_url = Column(String, nullable=True)
+    sync_key = Column(String, nullable=True)
+    created_at = Column(String, default=lambda: datetime.now().isoformat())
+    updated_at = Column(String, default=lambda: datetime.now().isoformat())
+
+
+class BatchVideoItem(Base):
+    __tablename__ = "batch_video_items"
+    
+    id = Column(String, primary_key=True, index=True)
+    batch_job_id = Column(String, index=True)
+    video_id = Column(String, index=True)
+    url = Column(String)
+    title = Column(String, nullable=True)
+    duration = Column(String, nullable=True)
+    status = Column(String, default="pending") # pending, processing, completed, skipped, failed
+    error = Column(Text, nullable=True)
+    sync_status = Column(String, default="pending") # pending, synced, failed
+    presets_generated = Column(Integer, default=0)
+    created_at = Column(String, default=lambda: datetime.now().isoformat())
+    updated_at = Column(String, default=lambda: datetime.now().isoformat())
+

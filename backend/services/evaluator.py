@@ -25,20 +25,32 @@ def evaluate_learning_profile(question: str, answer: str) -> dict:
     """
 
     try:
+        from backend.services.llm import safe_gemini_generate_content
         client = get_gemini_client()
-        response = client.models.generate_content(
+        response = safe_gemini_generate_content(
+            client=client,
             model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.6-flash"),
             contents=[prompt]
         )
         raw = response.text.strip()
-        if raw.startswith("```json"):
-            raw = raw[7:-3]
-        elif raw.startswith("```"):
-            raw = raw[3:-3]
-        return json.loads(raw.strip())
+        cleaned = clean_json_string(raw)
+        return json.loads(cleaned)
     except Exception as e:
-        print(f"Error parsing JSON: {e}")
-        return {"score": 5, "type": "원리 이해", "advice": "꾸준히 질문하며 학습을 이어가세요."}
+        print(f"Error evaluating response with Gemini: {e}")
+        return fallback_evaluation()
+
+def evaluate_discussion_turn_sync(prompt: str) -> str:
+    try:
+        from backend.services.llm import safe_gemini_generate_content
+        client = get_gemini_client()
+        response = safe_gemini_generate_content(
+            client=client,
+            model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.6-flash"),
+            contents=[prompt]
+        )
+        return response.text
+    except Exception as e:
+        return f"종합 평가를 생성하는 중 오류가 발생했습니다: {e}"
 
 def generate_global_evaluation(profiles_data: str) -> str:
     """
@@ -58,8 +70,10 @@ def generate_global_evaluation(profiles_data: str) -> str:
     3. 앞으로 어떤 점에 집중해서 공부하면 좋을지 구체적인 학습 방향을 제시하세요.
     """
     try:
+        from backend.services.llm import safe_gemini_generate_content
         client = get_gemini_client()
-        response = client.models.generate_content(
+        response = safe_gemini_generate_content(
+            client=client,
             model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.6-flash"),
             contents=[prompt]
         )

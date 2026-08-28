@@ -197,4 +197,10 @@ def celery_generate_guide_task(self, job_id: str, request_data: dict, file_paths
     # Run the async logic in a synchronous Celery task
     asyncio.run(async_generate_guide(job_id, request_data, file_paths))
 
+@celery_app.task(bind=True)
+def celery_batch_pregenerate_task(self, batch_id: str):
+    from backend.services.batch_generator import run_batch_pregeneration_pipeline
+    asyncio.run(run_batch_pregeneration_pipeline(batch_id))
+
+
 
