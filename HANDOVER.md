@@ -39,9 +39,11 @@
 
 ## 3. Notion 문서 관리 현황
 
-1. **[신규 가이드] [🚀 프로젝트 작업 시작 및 터미널 3대 프로세스 가이드](https://app.notion.com/p/3-3cba8db03fbe81b9aedcf37d7f5b68b5)** (대분류 및 하위 4개 세부 매뉴얼 완비).
-2. **이슈 리포트 (종결)**: [[Bug Report] Vercel 프로덕션 가이드 생성 시 유튜브 봇 감지 오디오 다운로드 실패 이슈](https://app.notion.com/p/Bug-Report-Vercel-Resolved-3cba8db03fbe81e4a59fe0d3e1301b40) **`Resolved`** 로 종결.
-3. **이슈 리포트 (이전 완료)**: [[Bug] 유튜브 일괄 사전 생성 실패 및 운영 서버 동기화 오류](https://app.notion.com/p/Bug-Resolved-3caa8db03fbe81489f40e5feeaf99901) **`Resolved`** 로 종결.
+1. **[공식 이슈 보드] [📋 Interactive Video Study Guide System 이슈 리포트 (통합 대시보드)](https://app.notion.com/p/3cba8db03fbe80a7972be85c1b2c2202)**:
+   - 📄 [[AI 가이드 생성] 자막 없는 유튜브 오디오 Whisper 변환 시 Quota 소진으로 인한 생성 실패](https://app.notion.com/p/AI-Whisper-Quota-3c6a8db03fbe81ed95b1e6fa2f24bb14) (`Resolved`)
+   - 📄 [[Bug] 유튜브 일괄 사전 생성 실패 및 운영 서버 동기화 오류](https://app.notion.com/p/Bug-Resolved-3caa8db03fbe81489f40e5feeaf99901) (`Resolved`)
+   - 📄 [[Bug Report] Vercel 프로덕션 가이드 생성 시 유튜브 봇 감지 오디오 다운로드 실패 이슈](https://app.notion.com/p/Bug-Report-Vercel-Resolved-3cba8db03fbe81e4a59fe0d3e1301b40) (`Resolved`)
+2. **[개발/가동 가이드] [🚀 프로젝트 작업 시작 및 터미널 3대 프로세스 가이드](https://app.notion.com/p/3-3cba8db03fbe81b9aedcf37d7f5b68b5)** (대분류 및 하위 4개 세부 매뉴얼 완비).
 
 ---
 
