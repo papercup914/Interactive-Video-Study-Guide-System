@@ -171,69 +171,104 @@ def extract_video_id(url: str) -> str:
 def _fetch_innertube_captions(video_id: str) -> str | None:
     """
     YouTube Innertube Android 모바일 API를 통해 자막을 직접 가져옵니다.
-    AWS 등 클라우드 IP 차단을 완전히 우회하며 100% 안정적으로 작동합니다.
+    최신 Android 20.10.38 클라이언트 및 API Key 연동으로 클라우드 IP에서도 안정적으로 작동합니다.
     """
     import xml.etree.ElementTree as ET
     import html
+    import re
     
-    url = "https://www.youtube.com/youtubei/v1/player"
-    headers = {
-        "User-Agent": "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "context": {
-            "client": {
-                "clientName": "ANDROID",
-                "clientVersion": "19.09.37",
-                "androidSdkVersion": 30,
+    if not video_id:
+        return None
+        
+    try:
+        # 1. HTML 요청으로 INNERTUBE_API_KEY 추출 (실패 시 기본 키 사용)
+        api_key = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"
+        try:
+            r_html = requests.get(
+                f"https://www.youtube.com/watch?v={video_id}",
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+                timeout=6
+            )
+            if r_html.status_code == 200:
+                match = re.search(r'"INNERTUBE_API_KEY":\s*"([a-zA-Z0-9_-]+)"', r_html.text)
+                if match:
+                    api_key = match.group(1)
+        except Exception as e:
+            print(f"[Transcript] Innertube API Key 추출 경고 (기본 키 fallback 사용): {e}")
+
+        # 2. 클라이언트 후보군 (ANDROID 20.10.38 최우선)
+        clients = [
+            {
+                "name": "ANDROID",
+                "clientVersion": "20.10.38",
+                "hl": "ko",
+                "gl": "KR"
+            },
+            {
+                "name": "ANDROID_TESTSUITE",
+                "clientVersion": "1.9",
                 "hl": "ko",
                 "gl": "KR"
             }
-        },
-        "videoId": video_id
-    }
-    try:
-        r = requests.post(url, json=payload, headers=headers, timeout=6)
-        if r.status_code == 200:
-            data = r.json()
-            captions = data.get("captions", {}).get("playerCaptionsTracklistRenderer", {}).get("captionTracks", [])
-            if captions:
-                # 1. 한국어 우선 검색
-                target_track = None
-                for c in captions:
-                    if "ko" in c.get("languageCode", "").lower():
-                        target_track = c
-                        break
-                # 2. 영어 검색
-                if not target_track:
-                    for c in captions:
-                        if "en" in c.get("languageCode", "").lower():
-                            target_track = c
-                            break
-                # 3. 첫 번째 트랙 선택
-                if not target_track:
-                    target_track = captions[0]
-                    
-                base_url = target_track.get("baseUrl")
-                if base_url:
-                    # 한국어 번역 옵션 추가
-                    if "ko" not in target_track.get("languageCode", "").lower():
-                        base_url = f"{base_url}&tlang=ko"
-                        
-                    sub_r = requests.get(base_url, timeout=6)
-                    if sub_r.status_code == 200 and len(sub_r.text) > 0:
-                        root = ET.fromstring(sub_r.text)
-                        texts = []
-                        for p in root.findall(".//text"):
-                            if p.text:
-                                texts.append(p.text.strip())
-                        full_text = html.unescape(" ".join(texts)).strip()
-                        if full_text and len(full_text) > 30:
-                            print(f"[Transcript] 0차(Innertube 모바일 API) 성공! ({len(full_text)}자)")
-                            return full_text
+        ]
+
+        url = f"https://www.youtube.com/youtubei/v1/player?key={api_key}" if api_key else "https://www.youtube.com/youtubei/v1/player"
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "com.google.android.youtube/20.10.38 (Linux; U; Android 14) gzip"
+        }
+
+        for client_info in clients:
+            payload = {
+                "context": {
+                    "client": client_info
+                },
+                "videoId": video_id
+            }
+
+            try:
+                r = requests.post(url, json=payload, headers=headers, timeout=8)
+                if r.status_code == 200:
+                    data = r.json()
+                    captions = data.get("captions", {}).get("playerCaptionsTracklistRenderer", {}).get("captionTracks", [])
+                    if captions:
+                        # 1. 한국어 우선 검색
+                        target_track = None
+                        for c in captions:
+                            if "ko" in c.get("languageCode", "").lower():
+                                target_track = c
+                                break
+                        # 2. 영어 검색
+                        if not target_track:
+                            for c in captions:
+                                if "en" in c.get("languageCode", "").lower():
+                                    target_track = c
+                                    break
+                        # 3. 첫 번째 트랙 선택
+                        if not target_track:
+                            target_track = captions[0]
+
+                        base_url = target_track.get("baseUrl")
+                        if base_url:
+                            # 한국어 번역 옵션 추가
+                            if "ko" not in target_track.get("languageCode", "").lower():
+                                base_url = f"{base_url}&tlang=ko"
+
+                            sub_r = requests.get(base_url, timeout=8)
+                            if sub_r.status_code == 200 and len(sub_r.text) > 0:
+                                try:
+                                    root = ET.fromstring(sub_r.text)
+                                    texts = [elem.text.strip() for elem in root.iter() if elem.text and elem.text.strip()]
+                                    full_text = html.unescape(" ".join(texts)).strip()
+                                    if full_text and len(full_text) > 30:
+                                        print(f"[Transcript] 0차(Innertube {client_info['name']} API) 성공! ({len(full_text)}자)")
+                                        return full_text
+                                except Exception as parse_err:
+                                    print(f"[Transcript] Innertube XML 파싱 경고: {parse_err}")
+            except Exception as client_err:
+                print(f"[Transcript] Innertube {client_info['name']} 시도 실패: {client_err}")
     except Exception as e:
-        print(f"[Transcript] Innertube 모바일 API 실패: {e}")
+        print(f"[Transcript] Innertube 모바일 API 전체 실패: {e}")
     return None
 
 def _extract_transcript_from_list(transcript_list) -> str | None:

@@ -8,39 +8,73 @@
 
 | 계층 | 기술 스택 | 배포 위치 및 프로덕션 URL | 상태 |
 | :--- | :--- | :--- | :--- |
-| **Frontend** | Next.js 16.2.10 (App Router), React 19.2.4, Tailwind CSS v4 | **Vercel**: `https://interactive-video-study-guide-syste.vercel.app` | 🟢 라이브 가동 중 |
-| **Backend** | FastAPI (Python 3.12/3.13), Celery, Redis, SQLAlchemy | **AWS EC2 (Free Tier)**: `http://13.209.73.143:8000` | 🟢 200 OK 가동 중 |
-| **Auth & DB** | Supabase Auth (Google OAuth, JWT 쿠키 세션, Edge Guard) | **Supabase Cloud / Neon DB** | 🟢 연동 완료 |
-| **AI Engine** | Google GenAI SDK (Gemini 2.5 Flash / 3.6 Flash) | BYOK / Cloudflare Tunnel / Direct REST | 🟢 정상 연동 (E2E 검증 완료) |
-| **Batch Engine** | 로컬 PC 연산 기반 선행 생성 (yt-dlp flat-playlist) | **Local PC (`http://localhost:8000`)** | 🟢 신규 구현 및 실기 검증 완료 |
+| **Frontend** | Next.js 16.2.10 (App Router), React 19.2.4, Tailwind CSS v4 | **Vercel**: `https://interactive-video-study-guide-syste.vercel.app` | 🟢 라이브 가동 중 (57개 프리셋 렌더링 확인) |
+| **Backend** | FastAPI (Python 3.12), Celery, Redis, Docker Compose | **AWS EC2 (Free Tier)**: `http://13.209.73.143:8000` | 🟢 최신 Docker 이미지 빌드 및 정상 가동 중 |
+| **Auth & DB** | Supabase Auth (Google OAuth, JWT 쿠키 세션, Edge Guard) | **Supabase Cloud / Neon DB / SQLite** | 🟢 57개 프리셋 가이드 동기화 완료 |
+| **AI Engine** | Google GenAI SDK (`gemini-3.6/3.5/flash-lite` 다중 모델 체인) | Google AI API (API Key 연동) | 🟢 쿼터 소진 시 무중단 자동 전환 완비 |
+| **Batch Engine** | 로컬 PC 연산 기반 선행 생성 (yt-dlp flat-playlist) | **Local PC (`http://localhost:8000`)** | 🟢 6개 비디오 54개 프리셋 100% 생성 검증 완료 |
 
 ---
 
-## 2. 최근 구현 완료 내역 (Verified Features)
+## 2. 최근 해결된 주요 이슈 및 기능 구현 내역
 
-### ✅ [NEW] 개발자 전용 유튜브 대량 일괄 사전 생성 & 운영 서버 동기화 시스템
-AWS EC2 Free Tier의 리소스 고갈(OOM/다운)을 방지하기 위해, 개발자 로컬 PC의 하드웨어로 대량 가이드를 선행 생성(Pre-generation)하고 운영 서버로 동기화(Sync)하는 완전한 시스템이 구축되었습니다.
+### 1) [버그 해결] 유튜브 일괄 사전 생성 실패 이슈 완전 해결 (Resolved)
+- **원인 1**: `SELECTED_GEMINI_VERSION` 기본값이 미지원 모델명(`gemini-2.5-flash`)으로 되어 있어 404 발생 ➡️ 최신 지원 모델인 `gemini-3.6-flash` 및 `gemini-3.5-flash`로 변경 완료.
+- **원인 2**: `process_audio` 함수 시그니처 3개 인자(`audio_path, provider, url_hash`) 불일치 ➡️ 3개 인자 수용 및 안전 캐싱으로 수정 완료.
+- **원인 3**: 배치 시작 시 `remote_url`, `sync_key` 파라미터 미전달 ➡️ 프론트엔드 UI부터 백엔드 DB/파이프라인까지 전면 연동 완료.
 
-1. **Quota 소모 없는 고속 수집기 (`backend/services/batch_collector.py`)**:
-   - `yt-dlp --flat-playlist` 모드를 사용하여 YouTube Data API의 일일 할당량(10,000 Quota) 소모 없이 채널/재생목록 영상 목록을 초고속 수집.
-   - 쇼츠(Shorts) 영상(60초 이하 또는 `#shorts`) 자동 필터링 및 최대 개수(`max_limit`) 지정 지원.
+### 2) [AI 엔진 고도화] Google Gemini 무료 티어 일일 쿼터 극복: "다중 모델 자동 폴백 체인"
+- **문제**: Gemini 무료 티어의 경우 모델당 일일 20회(`GenerateRequestsPerDayPerProjectPerModel-FreeTier`) 요청 한도가 존재하여, 1번 비디오 완료 후 2~6번 비디오에서 `429 RESOURCE_EXHAUSTED` 발생.
+- **해결**: [`backend/services/llm.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/llm.py)에 `safe_gemini_generate_content`를 구축.
+  - `gemini-3.6-flash` ➡️ `gemini-3.5-flash` ➡️ `gemini-3.5-flash-lite` ➡️ `gemini-3.1-flash-lite` ➡️ `gemini-flash-lite-latest`
+  - 일일 한도 초과 감지 시 0.5초 만에 다음 가용 모델로 즉각 스위칭되어 6개 비디오(총 54개 프리셋)가 중단 없이 100% 생성 완료됨을 실측 검증.
 
-2. **비디오당 3×3=9개 프리셋 완전 사전 생성 (`backend/services/batch_generator.py`)**:
-   - 비디오당 자막/오디오를 **최초 1회만 다운로드 및 추출**하여 Whisper/다운로드 비용 극소화.
-   - 요약 분량(3종: `핵심 요약`, `적당한 설명`, `아주 상세하게`) × 설명 방식(3종: `비유 없이 담백하게`, `적절한 비유 추가`, `풍부한 비유`) = **총 9개 프리셋**을 연속/병렬 생성하여 DB에 저장.
-   - 사용자가 프론트엔드에서 어떤 옵션을 선택해도 **0초 만에 즉시 렌더링(캐시 히트)**.
-   - 이미 9개 프리셋이 생성된 비디오는 자동 건너뛰기(Skip)하여 불필요한 LLM 비용 방지 (덮어쓰기 옵션 지원).
+### 3) [AWS 운영 배포 & 동기화 완료]
+- 로컬의 최신 코드를 GitHub `main` 브랜치로 커밋/푸시 완료 (`81d1651`).
+- AWS EC2(`13.209.73.143`)에 SSH로 접속하여 `docker build -f Dockerfile.backend -t studyguide-backend:latest .` 최신 이미지 빌드 및 컨테이너 무중단 재가동 완료.
+- 로컬에 생성된 6개 비디오의 총 **57개 프리셋 학습 가이드 전량을 AWS 운영 DB로 100% 동기화(`synced_count: 57`) 완료**.
 
-3. **실시간 실행 로그 스트림 & 안전 실행 파이프라인 (`backend/services/job_manager.py`, `backend/routers/admin.py`)**:
-   - 로컬 환경에서 Celery/Redis 워커가 없더라도 FastAPI 내장 비동기 태스크(`asyncio.create_task`)로 즉시 백그라운드 연산이 실행되도록 보장.
-   - 배치 작업에 실시간 로그(`logs` JSON 필드)를 기록하고, 수집 ➡️ 자막 추출 ➡️ 9개 프리셋 생성 ➡️ 완료까지의 과정을 2초 간격 실시간 스트리밍.
+### 4) [동기화 최적화 & 안정성]
+- [`backend/services/sync_service.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/sync_service.py): 타임아웃을 10초로 최적화하고 404/403 발생 시 즉시 중단(Fast-Fail)하여 불필요한 대기(18분 지연) 원천 제거.
+- 프로세스 종료 시 Windows 소켓 락에 의한 터미널 프리징 대응 매뉴얼을 Notion에 구축.
 
-4. **AWS 운영 서버 안전 원격 동기화 (`backend/services/sync_service.py`, `backend/routers/admin.py`)**:
-   - 로컬에서 생성 완료된 가이드 데이터를 운영 서버(`POST /api/admin/sync-guide`)로 안전하게 전송.
-   - **`X-Admin-Sync-Key` 시크릿 헤더 인증**으로 비인가 접근을 원천 차단하며, 네트워크 일시 오류 시 **3회 지수 백오프 자동 재시도** 수행.
+---
 
-5. **로컬 관리자 대시보드 & 실시간 터미널 콘솔 (`frontend/src/app/admin/batch/page.tsx`)**:
-   - 눈이 편안하고 가독성이 뛰어난 모던 Slate/White 테마 및 완벽한 드롭다운 텍스트 명도 대비 적용.
+## 3. Notion 문서 관리 현황
+
+1. **일일 업무 보고서**: [2026-08-28 일일 업무 보고](https://app.notion.com/p/3b3a8db03fbe81a8b6d9dae4d3814afe) 작성 완료.
+2. **이슈 리포트**: [[Bug] 유튜브 일괄 사전 생성 실패 및 운영 서버 동기화 오류](https://app.notion.com/p/Bug-Resolved-3caa8db03fbe81489f40e5feeaf99901) **`Resolved (해결 완료)`** 로 종결.
+3. **이슈 대응 가이드**: [[Ops Guide] 백엔드 프로세스(Uvicorn) 종료 프리징 시 백그라운드 PID 강제 종료 및 포트 회수 가이드](https://app.notion.com/p/Ops-Guide-Uvicorn-PID-3caa8db03fbe81d2b7afd98af6c61ad8) 등록 완료.
+
+---
+
+## 4. 로컬 및 프로덕션 실행 가이드
+
+### 로컬 백엔드 실행
+```powershell
+cd "I:\Interactive Video Study Guide System"
+python -m uvicorn backend.main:app --reload --port 8000
+```
+
+### 로컬 프론트엔드 실행
+```powershell
+cd "I:\Interactive Video Study Guide System\frontend"
+npm run dev
+```
+
+### AWS EC2 운영 서버 재배포 시 (필요 시)
+```bash
+ssh -i "C:\Users\radia\.ssh\studyguide-key.pem" ubuntu@13.209.73.143 "cd ~/Interactive-Video-Study-Guide-System && git pull origin main && docker build -f Dockerfile.backend -t studyguide-backend:latest . && docker compose up -d --force-recreate"
+```
+
+---
+
+## 5. 다음 대화에서 이어서 진행할 수 있는 과제
+
+1. **프론트엔드 메인 목록 UI 그룹핑 개선 (UX)**:
+   - 현재 메인 페이지(`https://interactive-video-study-guide-syste.vercel.app/`)에서 동일 영상에 대해 9개의 프리셋 카드가 모두 개별 나열되는 현상을 **"1개의 대표 영상 카드"**로 묶고, 카드 클릭 시 9종 프리셋을 선택할 수 있도록 목록 UI 뷰 개선.
+2. **추가 유튜브 재생목록/채널 대량 생성 및 지속 운영**:
+   - 로컬 관리자 페이지(`http://localhost:3000/admin/batch`)에서 다른 추천 강의 재생목록들을 추가로 사전 생성하여 AWS로 원클릭 동기화./White 테마 및 완벽한 드롭다운 텍스트 명도 대비 적용.
    - 실시간 진행률 바(%), 4대 지표(총 비디오, 완료, 스킵, 실패), 비디오별 9개 프리셋 카운터(`0/9` ➡️ `9/9`).
    - 하단에 전문 터미널 형태의 **실시간 실행 로그 스트림 콘솔(Live Terminal Console)** 탑재 (자동 스크롤, 레벨별 컬러 배지, 원클릭 로그 복사).
 
