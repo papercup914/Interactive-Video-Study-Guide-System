@@ -29,6 +29,8 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
         force_refresh = request_data.get("force_refresh", False)
         
         is_document = False
+        raw_title = ""
+        transcript = ""
         
         if file_paths and len(file_paths) > 0:
             is_document = True
@@ -66,15 +68,30 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
             url_hash = get_url_hash(url) if transcript else None
             
             if not transcript:
-                update_job_status(job_id, "downloading_audio", "자막 없음. 오디오 다운로드 중...")
-                audio_path = await loop.run_in_executor(None, download_audio, url)
-                update_job_status(job_id, "transcribing", "오디오 텍스트 변환(Whisper/Gemini) 중...")
-                transcript = await loop.run_in_executor(None, process_audio, audio_path, provider)
-                url_hash = os.path.splitext(os.path.basename(audio_path))[0]
+                update_job_status(job_id, "downloading_audio", "자막 없음. 오디오 다운로드 시도 중...")
+                try:
+                    audio_path = await loop.run_in_executor(None, download_audio, url)
+                    update_job_status(job_id, "transcribing", "오디오 텍스트 변환(Whisper/Gemini) 중...")
+                    transcript = await loop.run_in_executor(None, process_audio, audio_path, provider)
+                    url_hash = os.path.splitext(os.path.basename(audio_path))[0]
+                except Exception as audio_err:
+                    print(f"[Tasks] YouTube audio download failed/blocked: {audio_err}. Falling back to Jina Reader...")
+                    update_job_status(job_id, "transcribing", "클라우드 환경 우회: 웹 분석 엔진(Jina Reader)으로 영상 정보 추출 중...")
+                    try:
+                        transcript, jina_title = await loop.run_in_executor(None, extract_text_from_web, url)
+                        url_hash = get_url_hash(url)
+                        if not raw_title or raw_title == "제목 알 수 없음":
+                            raw_title = jina_title
+                    except Exception as jina_err:
+                        print(f"[Tasks] Jina fallback failed: {jina_err}")
+                        raise audio_err
                 
             metadata = await loop.run_in_executor(None, get_video_metadata, url)
-            raw_title = metadata["title"]
-            video_duration = metadata["duration"]
+            if metadata and metadata.get("title") and metadata["title"] != "제목 알 수 없음":
+                raw_title = metadata["title"]
+                video_duration = metadata.get("duration", 0)
+            elif not raw_title:
+                raw_title = "유튜브 학습 가이드"
         else:
             update_job_status(job_id, "transcribing", "웹 페이지 텍스트 추출 중 (Jina Reader)...")
             transcript, raw_title = await loop.run_in_executor(None, extract_text_from_web, url)
