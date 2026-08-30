@@ -40,6 +40,15 @@
   3. **서버 사이드 본문 누락 감지 및 3회 에스컬레이션 재시도 가드레일**: 본문 누락 시 강력한 경고 지침으로 자동 재시도.
   4. **운영 서버(AWS EC2) 최신 배포 및 컨테이너 재기동 완료**: 전 챕터 2,300자 이상의 풍부한 서술형 본문 생성 검증 완료.
 
+### 5) [기능 구현] 가이드 상세 뷰어(`/guide/[jobId]`) 내 실시간 9종 프리셋 전환 & 매트릭스 탐색기 탑재 (Completed)
+- **배경 및 문제점**: 가이드 뷰어 내에서 요약 분량이나 설명 방식을 변경할 때, 이미 생성된 프리셋이 존재함에도 불구하고 무조건 재생성 대기 및 홈 리다이렉트가 발생하던 한계 해결.
+- **해결 내역**:
+  1. [`backend/routers/guide.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/routers/guide.py): 동일 비디오 ID/문서의 9종 형제 프리셋 목록을 즉시 조회하는 `GET /api/guide/presets` 엔드포인트 구현.
+  2. [`frontend/src/app/guide/[jobId]/page.tsx`](file:///i:/Interactive%20Video%20Study%20Guide%20System/frontend/src/app/guide/%5BjobId%5D/page.tsx):
+     - 요약 분량/설명 방식 드롭다운 변경 시, 이미 생성된 프리셋이면 즉시 해당 가이드로 화면 전환.
+     - 상단 툴바에 **"9종 프리셋 탐색기 (3x3 매트릭스)" 팝업 모달 (`ViewerPresetMatrixModal`)** 탑재 (현재 열람 중 표시, 초록 체크 즉시 이동, 미생성 프리셋 생성 유도).
+  3. **검증**: `FastAPI TestClient` 및 `next build` (Turbopack) 100% 무결성 검증 완료.
+
 ---
 
 ## 3. Notion 문서 관리 현황
@@ -78,7 +87,8 @@ celery -A backend.celery_app worker --loglevel=info -P solo
 
 ## 5. 다음 대화에서 이어서 진행할 수 있는 과제
 
-1. **가이드 상세 뷰어(`/guide/[jobId]`) 내 실시간 프리셋 전환 연동**:
-   - 뷰어 내부에서 요약 분량/설명 방식 토글 변경 시, 이미 생성된 다른 8종 프리셋이 있으면 AI 재생성 대기 없이 즉시 해당 프리셋으로 전환 렌더링하는 UX 연동.
-2. **추가 유튜브 재생목록 대량 사전 생성 및 AWS 동기화**:
+1. **추가 유튜브 재생목록 대량 사전 생성 및 AWS 동기화**:
    - 관리자 대시보드(`/admin/batch`)에서 신규 추천 강의 재생목록(CS 전공 지식, 알고리즘, 최신 AI 기술 등)을 일괄 생성하여 AWS 운영 DB로 푸시.
+2. **Vercel / AWS EC2 최신 변경사항 배포**:
+   - 뷰어 실시간 프리셋 전환 기능이 포함된 최신 버전을 git push 및 배포.
+

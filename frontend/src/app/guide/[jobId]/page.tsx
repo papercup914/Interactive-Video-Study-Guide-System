@@ -2,7 +2,12 @@
 
 import { useEffect, useState, use, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Loader2, List, FileText, Sparkles, X, Save, MessageSquare, Trash2, AlertTriangle, Link as LinkIcon, PlayCircle, Play, Pause, FastForward, Rewind, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { 
+  ArrowLeft, Loader2, List, FileText, Sparkles, X, Save, 
+  MessageSquare, Trash2, AlertTriangle, Link as LinkIcon, 
+  PlayCircle, Play, Pause, FastForward, Rewind, PanelLeftClose, 
+  PanelLeftOpen, CheckCircle2, ChevronRight, Grid 
+} from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
@@ -36,6 +41,147 @@ type Note = {
   question: string;
   answer: string;
 };
+
+const LENGTH_PRESETS = ["핵심 요약", "적당한 설명", "아주 상세하게"] as const;
+const ANALOGY_PRESETS = ["비유 없이 담백하게", "적절한 비유 추가", "풍부한 비유"] as const;
+
+export type PresetInfo = {
+  id: string;
+  title: string;
+  url: string;
+  date: string;
+  length_preset: string;
+  analogy_preset: string;
+  chapter_count: number;
+  provider: string;
+  image_url?: string;
+  video_duration?: string;
+};
+
+/**
+ * 가이드 상세 뷰어 전용 9종 프리셋 매트릭스 탐색 모달
+ */
+function ViewerPresetMatrixModal({
+  title,
+  currentJobId,
+  presets,
+  totalPresets,
+  onClose,
+  onSelectGuide,
+  onCreatePreset
+}: {
+  title: string;
+  currentJobId: string;
+  presets: Record<string, PresetInfo>;
+  totalPresets: number;
+  onClose: () => void;
+  onSelectGuide: (jobId: string) => void;
+  onCreatePreset: (length: string, analogy: string) => void;
+}) {
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4 animate-in fade-in" onClick={onClose}>
+      <div className="bg-surface w-full max-w-2xl rounded-2xl p-6 shadow-2xl border border-border-subtle animate-in zoom-in-95" onClick={(e) => e.stopPropagation()}>
+        {/* Modal Header */}
+        <div className="flex justify-between items-start mb-4 pb-3 border-b border-border-subtle">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="bg-primary/10 text-primary text-xs font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                <Sparkles size={12} /> 9종 프리셋 탐색기
+              </span>
+              <span className="text-xs text-muted-foreground">총 {totalPresets}개 프리셋 보유</span>
+            </div>
+            <h3 className="font-bold text-base text-text-primary line-clamp-1">{title.replace(/\.pdf$/i, '')}</h3>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-text-primary p-1.5 rounded-lg hover:bg-surface-variant transition-colors">
+            <X size={20} />
+          </button>
+        </div>
+
+        <p className="text-xs text-muted-foreground mb-4">
+          원하는 <b>요약 분량</b>과 <b>설명 방식</b>의 조합을 클릭하면 해당 맞춤형 학습 가이드로 즉시 이동합니다.
+        </p>
+
+        {/* 3x3 Preset Grid */}
+        <div className="grid grid-cols-3 gap-3">
+          {LENGTH_PRESETS.map((length) => (
+            <div key={length} className="flex flex-col gap-2">
+              <div className="bg-surface-variant text-center font-bold text-xs py-1.5 rounded-lg text-text-primary">
+                {length}
+              </div>
+              <div className="flex flex-col gap-2">
+                {ANALOGY_PRESETS.map((analogy) => {
+                  const key = `${length}__${analogy}`;
+                  const item = presets[key];
+                  const isAvailable = Boolean(item);
+                  const isCurrent = item?.id === currentJobId;
+
+                  return (
+                    <button
+                      key={analogy}
+                      onClick={() => {
+                        if (isAvailable && item) {
+                          onSelectGuide(item.id);
+                        } else {
+                          onCreatePreset(length, analogy);
+                        }
+                      }}
+                      className={`p-2.5 rounded-xl border text-left flex flex-col justify-between min-h-[76px] transition-all relative ${
+                        isCurrent
+                          ? "bg-primary/10 border-primary shadow-sm ring-2 ring-primary/20 cursor-default"
+                          : isAvailable
+                          ? "bg-surface border-border-subtle hover:border-primary hover:shadow-md cursor-pointer group/card"
+                          : "bg-surface-container-lowest/50 border-dashed border-border-subtle/50 opacity-50 hover:opacity-80 hover:border-primary/40 cursor-pointer"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <span className={`font-semibold text-[11px] ${isCurrent ? "text-primary font-bold" : "text-text-primary group-hover/card:text-primary"} transition-colors`}>
+                          {analogy}
+                        </span>
+                        {isCurrent ? (
+                          <span className="text-[9px] font-bold bg-primary text-white px-1.5 py-0.2 rounded-full shrink-0">
+                            현재 열람 중
+                          </span>
+                        ) : isAvailable ? (
+                          <CheckCircle2 size={13} className="text-green-500 shrink-0" />
+                        ) : (
+                          <span className="text-[9px] text-muted-foreground">미생성</span>
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between mt-1 text-[10px]">
+                        {isCurrent ? (
+                          <span className="text-primary font-bold">{item.chapter_count}개 챕터</span>
+                        ) : isAvailable ? (
+                          <>
+                            <span className="text-muted-foreground">{item.chapter_count}개 챕터</span>
+                            <span className="text-primary font-bold flex items-center">
+                              보기 <ChevronRight size={10} />
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-muted-foreground text-[9px] hover:text-primary">클릭하여 생성</span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-6 pt-3 border-t border-border-subtle flex justify-between items-center text-xs text-muted-foreground">
+          <span>* 비유/분량에 따라 AI 설명 톤과 깊이가 최적화되어 있습니다.</span>
+          <button
+            onClick={onClose}
+            className="bg-foreground text-background px-4 py-2 rounded-lg font-bold hover:opacity-90 transition-opacity"
+          >
+            닫기
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const SidebarNav = ({ sections, router, isFloating = false }: { sections: string[], router: any, isFloating?: boolean }) => (
   <div className={`sticky top-24 premium-glass rounded-[2rem] p-6 shadow-sm max-h-[80vh] overflow-y-auto ${isFloating ? '' : 'w-64'}`}>
@@ -264,6 +410,11 @@ export default function GuideViewer({ params }: { params: Promise<{ jobId: strin
   const [originalAnalogyPreset, setOriginalAnalogyPreset] = useState("적절한 비유 추가");
   const [isRegenerating, setIsRegenerating] = useState(false);
   
+  // 9종 프리셋 상태
+  const [siblingPresets, setSiblingPresets] = useState<Record<string, PresetInfo>>({});
+  const [totalSiblingPresets, setTotalSiblingPresets] = useState<number>(1);
+  const [showPresetMatrix, setShowPresetMatrix] = useState<boolean>(false);
+  
   const resolvedParams = use(params);
   const jobId = resolvedParams.jobId;
 
@@ -305,6 +456,53 @@ export default function GuideViewer({ params }: { params: Promise<{ jobId: strin
   };
 
   const articleRef = useRef<HTMLElement>(null);
+
+  const fetchSiblingPresets = async (currentJobId: string, currentUrl?: string) => {
+    try {
+      const query = currentJobId ? `job_id=${encodeURIComponent(currentJobId)}` : `url=${encodeURIComponent(currentUrl || '')}`;
+      const res = await fetch(`/api/guide/presets?${query}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.presets && typeof data.presets === "object") {
+          setSiblingPresets(data.presets);
+          setTotalSiblingPresets(data.total_presets || Object.keys(data.presets).length);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to fetch sibling presets", e);
+    }
+  };
+
+  const handleLengthPresetChange = (newLength: string) => {
+    setLengthPreset(newLength);
+    const targetKey = `${newLength}__${analogyPreset}`;
+    const targetItem = siblingPresets[targetKey];
+    if (targetItem && targetItem.id && targetItem.id !== jobId) {
+      router.push(`/guide/${targetItem.id}`);
+    }
+  };
+
+  const handleAnalogyPresetChange = (newAnalogy: string) => {
+    setAnalogyPreset(newAnalogy);
+    const targetKey = `${lengthPreset}__${newAnalogy}`;
+    const targetItem = siblingPresets[targetKey];
+    if (targetItem && targetItem.id && targetItem.id !== jobId) {
+      router.push(`/guide/${targetItem.id}`);
+    }
+  };
+
+  const handleSelectPresetGuide = (targetJobId: string) => {
+    setShowPresetMatrix(false);
+    if (targetJobId && targetJobId !== jobId) {
+      router.push(`/guide/${targetJobId}`);
+    }
+  };
+
+  const handleCreatePresetFromModal = (length: string, analogy: string) => {
+    setShowPresetMatrix(false);
+    setLengthPreset(length);
+    setAnalogyPreset(analogy);
+  };
 
   useEffect(() => {
     fetchDocument();
@@ -358,6 +556,7 @@ export default function GuideViewer({ params }: { params: Promise<{ jobId: strin
           setIsLeftPanelOpen(false);
         }
 
+        fetchSiblingPresets(jobId, docUrl);
         localStorage.setItem(`harness_guide_${jobId}`, JSON.stringify(data));
       } else {
         if (!cached) {
@@ -846,43 +1045,84 @@ export default function GuideViewer({ params }: { params: Promise<{ jobId: strin
             )}
             
             {/* Options Toolbar */}
-            <div className="bg-surface-container border border-border-subtle rounded-xl p-3 mb-6 flex flex-wrap items-center gap-4">
-               <div className="flex items-center gap-2">
-                 <span className="font-body-sm text-xs font-semibold text-muted-foreground">요약 분량</span>
-                 <select 
-                   className="bg-transparent border-none font-body-sm text-body-sm text-text-primary cursor-pointer focus:ring-0 py-0 pl-1 pr-6"
-                   value={lengthPreset}
-                   onChange={(e) => setLengthPreset(e.target.value)}
-                 >
-                   <option value="핵심 요약">핵심 요약</option>
-                   <option value="적당한 설명">적당한 설명</option>
-                   <option value="아주 상세하게">아주 상세하게</option>
-                 </select>
-               </div>
-               <div className="flex items-center gap-2">
-                 <span className="font-body-sm text-xs font-semibold text-muted-foreground">설명 방식</span>
-                 <select 
-                   className="bg-transparent border-none font-body-sm text-body-sm text-text-primary cursor-pointer focus:ring-0 py-0 pl-1 pr-6"
-                   value={analogyPreset}
-                   onChange={(e) => setAnalogyPreset(e.target.value)}
-                 >
-                   <option value="비유 없이 담백하게">비유 없이 담백하게</option>
-                   <option value="적절한 비유 추가">적절한 비유 추가</option>
-                   <option value="풍부한 비유">풍부한 비유</option>
-                 </select>
-               </div>
-               
-               {(lengthPreset !== originalLengthPreset || analogyPreset !== originalAnalogyPreset) && (
-                 <button 
-                   onClick={handleRegenerate}
-                   disabled={isRegenerating}
-                   className="ml-auto bg-primary-container text-on-primary px-4 py-1.5 rounded-lg font-label-md text-label-md hover:bg-hover-indigo transition-colors flex items-center gap-2 disabled:opacity-50"
-                 >
-                   {isRegenerating ? <Loader2 className="animate-spin" size={16}/> : <Sparkles size={16}/>}
-                   새 버전으로 재생성
-                 </button>
-               )}
-            </div>
+            {(() => {
+              const currentKey = `${lengthPreset}__${analogyPreset}`;
+              const matchedSibling = siblingPresets[currentKey];
+              const isMatchedAvailable = Boolean(matchedSibling);
+              const isOtherExisting = isMatchedAvailable && matchedSibling.id !== jobId;
+              const isUncreated = !isMatchedAvailable;
+
+              return (
+                <div className="bg-surface-container border border-border-subtle rounded-2xl p-3.5 mb-6 flex flex-wrap items-center gap-3 md:gap-4 shadow-sm">
+                  {/* 요약 분량 드롭다운 */}
+                  <div className="flex items-center gap-2 bg-surface px-3 py-1.5 rounded-xl border border-border-subtle/80 shadow-xs">
+                    <span className="font-body-sm text-xs font-semibold text-muted-foreground whitespace-nowrap">요약 분량</span>
+                    <select 
+                      className="bg-transparent border-none font-body-sm text-xs md:text-sm font-bold text-text-primary cursor-pointer focus:ring-0 py-0 pl-1 pr-6"
+                      value={lengthPreset}
+                      onChange={(e) => handleLengthPresetChange(e.target.value)}
+                    >
+                      {LENGTH_PRESETS.map((lp) => (
+                        <option key={lp} value={lp}>{lp}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* 설명 방식 드롭다운 */}
+                  <div className="flex items-center gap-2 bg-surface px-3 py-1.5 rounded-xl border border-border-subtle/80 shadow-xs">
+                    <span className="font-body-sm text-xs font-semibold text-muted-foreground whitespace-nowrap">설명 방식</span>
+                    <select 
+                      className="bg-transparent border-none font-body-sm text-xs md:text-sm font-bold text-text-primary cursor-pointer focus:ring-0 py-0 pl-1 pr-6"
+                      value={analogyPreset}
+                      onChange={(e) => handleAnalogyPresetChange(e.target.value)}
+                    >
+                      {ANALOGY_PRESETS.map((ap) => (
+                        <option key={ap} value={ap}>{ap}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* 9종 프리셋 탐색기 모달 트리거 버튼 */}
+                  <button 
+                    type="button"
+                    onClick={() => setShowPresetMatrix(true)}
+                    className="flex items-center gap-1.5 px-3 py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-xl font-bold text-xs transition-colors border border-primary/20 cursor-pointer shadow-xs"
+                    title="9종 맞춤형 프리셋 전체보기"
+                  >
+                    <Sparkles size={14} className="text-primary animate-pulse" />
+                    <span className="hidden sm:inline">9종 프리셋 탐색기</span>
+                    <span className="sm:hidden">9종 탐색기</span>
+                    <span className="bg-primary text-white text-[10px] px-1.5 py-0.2 rounded-full font-extrabold ml-0.5">
+                      {totalSiblingPresets}/9
+                    </span>
+                  </button>
+
+                  {/* 다른 생성된 프리셋이 선택되었을 때의 바로 이동 버튼 */}
+                  {isOtherExisting && (
+                    <button 
+                      onClick={() => router.push(`/guide/${matchedSibling.id}`)}
+                      className="ml-auto bg-primary text-white px-4 py-2 rounded-xl font-bold text-xs hover:bg-primary/90 transition-all flex items-center gap-1.5 shadow-sm hover:shadow"
+                    >
+                      <CheckCircle2 size={14} className="text-green-300" />
+                      <span>해당 버전으로 즉시 이동</span>
+                      <ChevronRight size={12} />
+                    </button>
+                  )}
+
+                  {/* 미생성 프리셋이 선택되었을 때의 재생성/새로 생성 버튼 */}
+                  {isUncreated && (
+                    <button 
+                      onClick={handleRegenerate}
+                      disabled={isRegenerating}
+                      className="ml-auto bg-primary-container text-on-primary px-4 py-2 rounded-xl font-bold text-xs hover:bg-hover-indigo transition-colors flex items-center gap-2 disabled:opacity-50 shadow-sm"
+                    >
+                      {isRegenerating ? <Loader2 className="animate-spin" size={14}/> : <Sparkles size={14}/>}
+                      <span>새 버전으로 생성하기</span>
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
             
             <div className="bg-surface-container-low p-4 rounded-lg border border-border-subtle mb-6 lg:mb-0">
               <h3 className="font-label-md text-label-md text-text-primary mb-2">Guide Overview</h3>
@@ -1224,6 +1464,19 @@ export default function GuideViewer({ params }: { params: Promise<{ jobId: strin
              </div>
           </div>
         </div>
+      )}
+
+      {/* 9종 프리셋 탐색기 모달 */}
+      {showPresetMatrix && (
+        <ViewerPresetMatrixModal
+          title={title}
+          currentJobId={jobId}
+          presets={siblingPresets}
+          totalPresets={totalSiblingPresets}
+          onClose={() => setShowPresetMatrix(false)}
+          onSelectGuide={handleSelectPresetGuide}
+          onCreatePreset={handleCreatePresetFromModal}
+        />
       )}
 
     </div>

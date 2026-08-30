@@ -83,6 +83,77 @@ async def check_existing_guide(url: str):
             
     return {"exists": False}
 
+@router.get("/presets")
+async def get_video_presets(job_id: Optional[str] = None, url: Optional[str] = None):
+    """
+    특정 가이드(job_id) 또는 영상 URL에 해당하는 모든 형제 프리셋(9종) 목록을 반환합니다.
+    """
+    try:
+        target_vid = ""
+        target_title = ""
+        target_url = url or ""
+        
+        guides = get_all_study_guides()
+        if not guides:
+            return {"url": target_url, "presets": {}, "total_presets": 0, "current_job_id": job_id}
+            
+        current_guide = None
+        if job_id:
+            for g in guides:
+                if g.get("id") == job_id:
+                    current_guide = g
+                    target_url = g.get("url", "")
+                    target_title = g.get("title", "")
+                    break
+                    
+        if target_url:
+            target_vid = extract_video_id(target_url)
+            
+        sibling_guides = []
+        for g in guides:
+            if not g:
+                continue
+            g_url = g.get("url", "")
+            g_vid = extract_video_id(g_url) if g_url else ""
+            
+            # YouTube 비디오 ID가 일치하거나, 비디오 ID가 없으면 URL/Title이 일치하는 경우
+            if target_vid and g_vid and target_vid == g_vid:
+                sibling_guides.append(g)
+            elif target_url and g_url and target_url.strip().lower() == g_url.strip().lower():
+                sibling_guides.append(g)
+            elif target_title and g.get("title") and target_title.strip() == g.get("title", "").strip():
+                sibling_guides.append(g)
+                
+        presets_map = {}
+        for g in sibling_guides:
+            length = g.get("length_preset") or "기본"
+            analogy = g.get("analogy_preset") or "기본"
+            key = f"{length}__{analogy}"
+            doc = g.get("document", {})
+            chapter_count = len(doc) if isinstance(doc, dict) else 0
+            presets_map[key] = {
+                "id": g.get("id"),
+                "title": g.get("title", "제목 없음"),
+                "url": g.get("url", ""),
+                "date": g.get("date", ""),
+                "length_preset": length,
+                "analogy_preset": analogy,
+                "chapter_count": chapter_count,
+                "provider": g.get("provider", ""),
+                "image_url": g.get("image_url", ""),
+                "video_duration": g.get("video_duration", "")
+            }
+            
+        return {
+            "url": target_url,
+            "title": target_title or (current_guide.get("title") if current_guide else ""),
+            "current_job_id": job_id,
+            "total_presets": len(presets_map),
+            "presets": presets_map
+        }
+    except Exception as e:
+        return {"url": url or "", "presets": {}, "total_presets": 0, "current_job_id": job_id, "error": str(e)}
+
 @router.get("/status/{job_id}")
 async def check_job_status(job_id: str):
     job = get_job(job_id)
