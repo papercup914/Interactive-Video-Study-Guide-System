@@ -32,8 +32,13 @@
   1. [`backend/services/video.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/video.py): 최신 Android 20.10.38 모바일 Innertube API 및 API Key 자동 주입.
   2. [`backend/services/tasks.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/tasks.py): 자막/오디오 직접 다운로드 차단 시 **Jina Reader AI 웹 분석 엔진(`https://r.jina.ai/`)으로 자동 폴백**하여 29,334자 분석 텍스트 확보 및 무중단 가이드 생성 성공.
 
-### 3) [AI 엔진 고도화] Google Gemini 무료 티어 일일 쿼터 극복: "다중 모델 자동 폴백 체인"
-- `gemini-3.6-flash` ➡️ `gemini-3.5-flash` ➡️ `gemini-3.5-flash-lite` ➡️ `gemini-3.1-flash-lite` ➡️ `gemini-flash-lite-latest` 무중단 자동 전환.
+### 4) [버그 해결] 2시간 이상 장문 유튜브 영상 가이드 생성 및 2단계 엄격 출력 체계(2-Stage Strict Output Structure) 반영 (Resolved)
+- **문제**: 2시간 11분 장문 영상(Andrej Karpathy 등)에서 구버전 캐시 오염 및 본문 서술 누락으로 질문식 태그만 노출되던 현상.
+- **해결 조치**:
+  1. [`backend/services/llm.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/llm.py): [Part 1: 1,500~3,000자 서술형 본문] + [Part 2: 최하단 인터랙티브 태그] 2단계 엄격 프롬프트 전면 개편.
+  2. **캐시 무결성 검증 및 자동 정제**: 1,000자 미만이거나 태그 단독 캐시 파일(291개) 일괄 삭제 및 서버 기동 시 자동 정제 훅 탑재.
+  3. **서버 사이드 본문 누락 감지 및 3회 에스컬레이션 재시도 가드레일**: 본문 누락 시 강력한 경고 지침으로 자동 재시도.
+  4. **운영 서버(AWS EC2) 최신 배포 및 컨테이너 재기동 완료**: 전 챕터 2,300자 이상의 풍부한 서술형 본문 생성 검증 완료.
 
 ---
 
@@ -43,6 +48,7 @@
    - 📄 [[AI 가이드 생성] 자막 없는 유튜브 오디오 Whisper 변환 시 Quota 소진으로 인한 생성 실패](https://app.notion.com/p/AI-Whisper-Quota-3c6a8db03fbe81ed95b1e6fa2f24bb14) (`Resolved`)
    - 📄 [[Bug] 유튜브 일괄 사전 생성 실패 및 운영 서버 동기화 오류](https://app.notion.com/p/Bug-Resolved-3caa8db03fbe81489f40e5feeaf99901) (`Resolved`)
    - 📄 [[Bug Report] Vercel 프로덕션 가이드 생성 시 유튜브 봇 감지 오디오 다운로드 실패 이슈](https://app.notion.com/p/Bug-Report-Vercel-Resolved-3cba8db03fbe81e4a59fe0d3e1301b40) (`Resolved`)
+   - 📄 [[Bug Report] 2시간 이상 장문 유튜브 영상 가이드 생성 이슈](https://app.notion.com/p/Bug-Report-2-Resolved-3cca8db03fbe81059afada2b6b96d034) (`Resolved`)
 2. **[개발/가동 가이드] [🚀 프로젝트 작업 시작 및 터미널 3대 프로세스 가이드](https://app.notion.com/p/3-3cba8db03fbe81b9aedcf37d7f5b68b5)** (대분류 및 하위 4개 세부 매뉴얼 완비).
 
 ---
