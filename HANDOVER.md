@@ -43,22 +43,29 @@
 ### 5) [기능 구현] 가이드 상세 뷰어(`/guide/[jobId]`) 내 실시간 9종 프리셋 전환 & 매트릭스 탐색기 탑재 (Completed)
 - **배경 및 문제점**: 가이드 뷰어 내에서 요약 분량이나 설명 방식을 변경할 때, 이미 생성된 프리셋이 존재함에도 불구하고 무조건 재생성 대기 및 홈 리다이렉트가 발생하던 한계 해결.
 - **해결 내역**:
-  1. [`backend/routers/guide.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/routers/guide.py): 동일 비디오 ID/문서의 9종 형제 프리셋 목록을 즉시 조회하는 `GET /api/guide/presets` 엔드포인트 구현.
+  1. [`backend/routers/guide.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/routers/guide.py):
+     - 동일 비디오 ID/문서의 9종 형제 프리셋 목록을 즉시 조회하는 `GET /api/guide/presets` 엔드포인트 구현.
+     - `normalize_length_preset`, `normalize_analogy_preset` 정규화 함수 탑재로 영문/비표준 프리셋 값을 표준 3x3 한글 명칭으로 자동 변환.
   2. [`frontend/src/app/guide/[jobId]/page.tsx`](file:///i:/Interactive%20Video%20Study%20Guide%20System/frontend/src/app/guide/%5BjobId%5D/page.tsx):
      - 요약 분량/설명 방식 드롭다운 변경 시, 이미 생성된 프리셋이면 즉시 해당 가이드로 화면 전환.
-     - 상단 툴바에 **"9종 프리셋 탐색기 (3x3 매트릭스)" 팝업 모달 (`ViewerPresetMatrixModal`)** 탑재 (현재 열람 중 표시, 초록 체크 즉시 이동, 미생성 프리셋 생성 유도).
-  3. **검증**: `FastAPI TestClient` 및 `next build` (Turbopack) 100% 무결성 검증 완료.
+     - 상단 툴바에 **"9종 프리셋 탐색기 (3x3 매트릭스)" 팝업 모달 (`ViewerPresetMatrixModal`)** 탑재.
+     - 현재 열람 중인 가이드에 대한 강제 Fallback 주입 로직으로 어떤 상황에서도 현재 가이드가 "현재 열람 중" 뱃지로 100% 매핑되도록 보장.
+     - 타이틀 정제 로직 탑재 (`- YouTube` 접미사 제거).
+  3. **배포 및 검증**:
+     - `npm run build` (Turbopack) 100% 무결성 검증 통과 (에러 0건).
+     - GitHub `main` 브랜치에 최신 코드 커밋 및 푸시 완료 (`ae99a9b`), Vercel 자동 배포 트리거 완료.
 
 ---
 
 ## 3. Notion 문서 관리 현황
 
 1. **[공식 이슈 보드] [📋 Interactive Video Study Guide System 이슈 리포트 (통합 대시보드)](https://app.notion.com/p/3cba8db03fbe80a7972be85c1b2c2202)**:
-   - 📄 [[AI 가이드 생성] 자막 없는 유튜브 오디오 Whisper 변환 시 Quota 소진으로 인한 생성 실패](https://app.notion.com/p/AI-Whisper-Quota-3c6a8db03fbe81ed95b1e6fa2f24bb14) (`Resolved`)
-   - 📄 [[Bug] 유튜브 일괄 사전 생성 실패 및 운영 서버 동기화 오류](https://app.notion.com/p/Bug-Resolved-3caa8db03fbe81489f40e5feeaf99901) (`Resolved`)
-   - 📄 [[Bug Report] Vercel 프로덕션 가이드 생성 시 유튜브 봇 감지 오디오 다운로드 실패 이슈](https://app.notion.com/p/Bug-Report-Vercel-Resolved-3cba8db03fbe81e4a59fe0d3e1301b40) (`Resolved`)
+   - 📄 [[Bug Report] 가이드 상세 뷰어 내 9종 프리셋 탐색기 미생성 표시 및 매칭 오류](https://app.notion.com/p/Bug-Report-9-In-Progress-3cca8db03fbe81e8a896ec1fcb14d163) (`In Progress` - 사용자 확인 대기 중)
    - 📄 [[Bug Report] 2시간 이상 장문 유튜브 영상 가이드 생성 이슈](https://app.notion.com/p/Bug-Report-2-Resolved-3cca8db03fbe81059afada2b6b96d034) (`Resolved`)
-2. **[개발/가동 가이드] [🚀 프로젝트 작업 시작 및 터미널 3대 프로세스 가이드](https://app.notion.com/p/3-3cba8db03fbe81b9aedcf37d7f5b68b5)** (대분류 및 하위 4개 세부 매뉴얼 완비).
+   - 📄 [[Bug Report] Vercel 프로덕션 가이드 생성 시 유튜브 봇 감지 오디오 다운로드 실패 이슈](https://app.notion.com/p/Bug-Report-Vercel-Resolved-3cba8db03fbe81e4a59fe0d3e1301b40) (`Resolved`)
+2. **[개발/가동 가이드]**:
+   - 📄 **[🚀 [운영 가이드] 로컬 개발부터 Vercel & AWS EC2 배포 및 서버 재시작 완전 정복 매뉴얼](https://app.notion.com/p/Vercel-AWS-EC2-3cca8db03fbe8110bd96cb12c92da8cf)** (전체 아키텍처, 터미널 & SSH 명령어, 실전 트러블슈팅 및 퀵 치트시트 완비).
+   - 📄 [[프로젝트 작업 시작 및 터미널 3대 프로세스 가이드]](https://app.notion.com/p/3-3cba8db03fbe81b9aedcf37d7f5b68b5).
 
 ---
 
@@ -83,12 +90,20 @@ cd "I:\Interactive Video Study Guide System"
 celery -A backend.celery_app worker --loglevel=info -P solo
 ```
 
+### AWS EC2 운영 백엔드 업데이트
+```bash
+cd ~/Interactive-Video-Study-Guide-System
+git pull origin main
+docker compose restart fastapi
+```
+
 ---
 
 ## 5. 다음 대화에서 이어서 진행할 수 있는 과제
 
-1. **추가 유튜브 재생목록 대량 사전 생성 및 AWS 동기화**:
+1. **9종 프리셋 탐색기 사용자 최종 테스트 확인 후 Notion 상태를 `Resolved`로 전환**:
+   - Notion 이슈 페이지(`3cca8db0-3fbe-81e8-a896-ec1fcb14d163`) 상태 업데이트.
+2. **추가 유튜브 재생목록 대량 사전 생성 및 AWS 동기화**:
    - 관리자 대시보드(`/admin/batch`)에서 신규 추천 강의 재생목록(CS 전공 지식, 알고리즘, 최신 AI 기술 등)을 일괄 생성하여 AWS 운영 DB로 푸시.
-2. **Vercel / AWS EC2 최신 변경사항 배포**:
-   - 뷰어 실시간 프리셋 전환 기능이 포함된 최신 버전을 git push 및 배포.
+
 

@@ -136,8 +136,8 @@ function ViewerPresetMatrixModal({
   const displayTitle = (title || "").replace(/^-\s*YouTube$/i, 'YouTube 학습 가이드').replace(/-\s*YouTube$/i, '').trim() || "YouTube 학습 가이드";
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4 animate-in fade-in" onClick={onClose}>
-      <div className="bg-surface w-full max-w-2xl rounded-2xl p-6 shadow-2xl border border-border-subtle animate-in zoom-in-95" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 bg-black/60 z-[110] flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-surface w-full max-w-2xl rounded-2xl p-6 shadow-2xl border border-border-subtle" onClick={(e) => e.stopPropagation()}>
         {/* Modal Header */}
         <div className="flex justify-between items-start mb-4 pb-3 border-b border-border-subtle">
           <div>
@@ -1146,7 +1146,7 @@ export default function GuideViewer({ params }: { params: Promise<{ jobId: strin
                     className="flex items-center gap-1.5 px-3 py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-xl font-bold text-xs transition-colors border border-primary/20 cursor-pointer shadow-xs"
                     title="9종 맞춤형 프리셋 전체보기"
                   >
-                    <Sparkles size={14} className="text-primary animate-pulse" />
+                    <Sparkles size={14} className="text-primary" />
                     <span className="hidden sm:inline">9종 프리셋 탐색기</span>
                     <span className="sm:hidden">9종 탐색기</span>
                     <span className="bg-primary text-white text-[10px] px-1.5 py-0.2 rounded-full font-extrabold ml-0.5">

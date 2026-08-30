@@ -122,8 +122,8 @@ function PresetMatrixModal({
   onSelectGuide: (jobId: string) => void;
 }) {
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4 animate-in fade-in" onClick={onClose}>
-      <div className="bg-surface w-full max-w-2xl rounded-2xl p-6 shadow-2xl border border-border-subtle animate-in zoom-in-95" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 bg-black/60 z-[110] flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-surface w-full max-w-2xl rounded-2xl p-6 shadow-2xl border border-border-subtle" onClick={(e) => e.stopPropagation()}>
         <div className="flex justify-between items-start mb-4 pb-3 border-b border-border-subtle">
           <div>
             <div className="flex items-center gap-2 mb-1">
