@@ -107,13 +107,20 @@ def normalize_analogy_preset(val: Optional[str]) -> str:
         return "풍부한 비유"
     return "적절한 비유 추가"
 
+def extract_key_for_group(url: Optional[str], title: Optional[str]) -> str:
+    if not url:
+        return (title or "unknown").strip().lower()
+    vid = extract_video_id(url)
+    if vid:
+        return f"yt_{vid}"
+    return url.strip().lower()
+
 @router.get("/presets")
 async def get_video_presets(job_id: Optional[str] = None, url: Optional[str] = None):
     """
     특정 가이드(job_id) 또는 영상 URL에 해당하는 모든 형제 프리셋(9종) 목록을 반환합니다.
     """
     try:
-        target_vid = ""
         target_title = ""
         target_url = url or ""
         
@@ -130,22 +137,21 @@ async def get_video_presets(job_id: Optional[str] = None, url: Optional[str] = N
                     target_title = g.get("title", "")
                     break
                     
-        if target_url:
-            target_vid = extract_video_id(target_url)
+        target_key = extract_key_for_group(target_url, target_title)
             
         sibling_guides = []
         for g in guides:
             if not g:
                 continue
             g_url = g.get("url", "")
-            g_vid = extract_video_id(g_url) if g_url else ""
+            g_title = g.get("title", "")
+            g_key = extract_key_for_group(g_url, g_title)
             
-            # YouTube 비디오 ID가 일치하거나, 비디오 ID가 없으면 URL/Title이 일치하는 경우
-            if target_vid and g_vid and target_vid == g_vid:
+            if target_key == g_key:
                 sibling_guides.append(g)
             elif target_url and g_url and target_url.strip().lower() == g_url.strip().lower():
                 sibling_guides.append(g)
-            elif target_title and g.get("title") and target_title.strip() == g.get("title", "").strip():
+            elif target_title and g_title and target_title.strip() == g_title.strip():
                 sibling_guides.append(g)
                 
         presets_map = {}

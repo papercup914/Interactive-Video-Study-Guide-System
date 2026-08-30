@@ -133,7 +133,14 @@ function ViewerPresetMatrixModal({
   const effectiveTotal = Math.max(totalPresets || 0, Object.keys(normalizedMap).length, 1);
 
   // 3. 타이틀 클린업
-  const displayTitle = (title || "").replace(/^-\s*YouTube$/i, 'YouTube 학습 가이드').replace(/-\s*YouTube$/i, '').trim() || "YouTube 학습 가이드";
+  let rawTitle = title || "";
+  if (!rawTitle || rawTitle === "YouTube 학습 가이드" || rawTitle === "AI 맞춤형 학습 가이드" || rawTitle.trim() === "- YouTube") {
+    const firstWithTitle = Object.values(normalizedMap).find(it => it.title && it.title !== "YouTube 학습 가이드" && it.title !== "AI 맞춤형 학습 가이드" && it.title.trim() !== "- YouTube");
+    if (firstWithTitle && firstWithTitle.title) {
+      rawTitle = firstWithTitle.title;
+    }
+  }
+  const displayTitle = rawTitle.replace(/^-\s*YouTube$/i, 'YouTube 학습 가이드').replace(/-\s*YouTube$/i, '').trim() || "YouTube 학습 가이드";
 
   return (
     <div className="fixed inset-0 bg-black/60 z-[110] flex items-center justify-center p-4" onClick={onClose}>
@@ -514,19 +521,73 @@ export default function GuideViewer({ params }: { params: Promise<{ jobId: strin
 
   const articleRef = useRef<HTMLElement>(null);
 
-  const fetchSiblingPresets = async (currentJobId: string, currentUrl?: string) => {
+function extractVideoKey(url: string, title: string): string {
+  if (!url) return title || "unknown";
+  const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([^&?]+)/);
+  if (ytMatch && ytMatch[1]) {
+    return `yt_${ytMatch[1]}`;
+  }
+  return url.trim().toLowerCase();
+}
+
+  const fetchSiblingPresets = async (currentJobId: string, currentUrl?: string, currentTitle?: string) => {
+    let loadedFromApi = false;
     try {
       const query = currentJobId ? `job_id=${encodeURIComponent(currentJobId)}` : `url=${encodeURIComponent(currentUrl || '')}`;
       const res = await fetch(`/api/guide/presets?${query}`);
       if (res.ok) {
         const data = await res.json();
-        if (data.presets && typeof data.presets === "object") {
+        if (data.presets && typeof data.presets === "object" && Object.keys(data.presets).length > 0) {
           setSiblingPresets(data.presets);
           setTotalSiblingPresets(data.total_presets || Object.keys(data.presets).length);
+          loadedFromApi = true;
         }
       }
     } catch (e) {
-      console.error("Failed to fetch sibling presets", e);
+      console.warn("Direct presets endpoint failed, falling back to history", e);
+    }
+
+    // 2. Fallback: /api/guide/history에서 동일 비디오 키 매칭 (대시보드와 100% 동일한 그룹핑)
+    if (!loadedFromApi) {
+      try {
+        const historyRes = await fetch("/api/guide/history");
+        if (historyRes.ok) {
+          const items = await historyRes.json();
+          if (Array.isArray(items)) {
+            const targetKey = extractVideoKey(currentUrl || "", currentTitle || "");
+            const matchedPresets: Record<string, PresetInfo> = {};
+            
+            for (const item of items) {
+              if (!item) continue;
+              const itemKey = extractVideoKey(item.url || "", item.title || "");
+              if (itemKey === targetKey) {
+                const l = normalizeLength(item.length_preset);
+                const a = normalizeAnalogy(item.analogy_preset);
+                const presetKey = `${l}__${a}`;
+                matchedPresets[presetKey] = {
+                  id: item.id,
+                  title: item.title,
+                  url: item.url,
+                  date: item.date,
+                  length_preset: l,
+                  analogy_preset: a,
+                  chapter_count: item.chapter_count || 0,
+                  provider: item.provider || "youtube",
+                  image_url: item.image_url,
+                  video_duration: item.video_duration
+                };
+              }
+            }
+            
+            if (Object.keys(matchedPresets).length > 0) {
+              setSiblingPresets(matchedPresets);
+              setTotalSiblingPresets(Object.keys(matchedPresets).length);
+            }
+          }
+        }
+      } catch (fallbackErr) {
+        console.error("Failed fallback sibling presets fetch", fallbackErr);
+      }
     }
   };
 
@@ -579,6 +640,7 @@ export default function GuideViewer({ params }: { params: Promise<{ jobId: strin
           if (data.profile_message) {
             setProfileMessage(data.profile_message);
           }
+          fetchSiblingPresets(jobId, data.url || "", data.title || "");
           setLoading(false);
         } catch(e) {}
       }
@@ -587,8 +649,6 @@ export default function GuideViewer({ params }: { params: Promise<{ jobId: strin
       if (res.ok) {
         const data = await res.json();
         
-
-
         setDocument(data.document);
         setNotes(data.notes || []);
         setTitle(data.title || "AI 맞춤형 학습 가이드");
@@ -613,7 +673,8 @@ export default function GuideViewer({ params }: { params: Promise<{ jobId: strin
           setIsLeftPanelOpen(false);
         }
 
-        fetchSiblingPresets(jobId, docUrl);
+        fetchSiblingPresets(jobId, docUrl, data.title || "");
+        localStorage.setItem(`harness_guide_${jobId}`, JSON.stringify(data));
         localStorage.setItem(`harness_guide_${jobId}`, JSON.stringify(data));
       } else {
         if (!cached) {

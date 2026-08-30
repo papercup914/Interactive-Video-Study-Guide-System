@@ -51,16 +51,26 @@
      - 상단 툴바에 **"9종 프리셋 탐색기 (3x3 매트릭스)" 팝업 모달 (`ViewerPresetMatrixModal`)** 탑재.
      - 현재 열람 중인 가이드에 대한 강제 Fallback 주입 로직으로 어떤 상황에서도 현재 가이드가 "현재 열람 중" 뱃지로 100% 매핑되도록 보장.
      - 타이틀 정제 로직 탑재 (`- YouTube` 접미사 제거).
-  3. **배포 및 검증**:
-     - `npm run build` (Turbopack) 100% 무결성 검증 통과 (에러 0건).
-     - GitHub `main` 브랜치에 최신 코드 커밋 및 푸시 완료 (`ae99a9b`), Vercel 자동 배포 트리거 완료.
+### 6) [버그 해결] 대시보드와 가이드 상세 뷰어 간 9종 프리셋 목록 및 제목 불일치 이슈 완전 해결 (Resolved)
+- **배경 및 문제점**: 메인 대시보드에서는 동일 영상(예: `LLM을 사용하는 방법`)의 프리셋 2개가 정상 표시되나, 가이드 상세 페이지에서는 1개만 표시되거나 미생성으로 나타나는 현상 발생.
+- **원인 분석**:
+  1. AWS EC2 백엔드에 `GET /api/guide/presets` 엔드포인트가 아직 배포(git pull & restart)되지 않아 405/404 오류 발생.
+  2. 프론트엔드 상세 페이지에서 백엔드 API 실패 시 전체 히스토리(`/api/guide/history`) 기반 클라이언트 Fallback 매핑이 없어 현재 가이드 1개만 기본값으로 주입됨.
+- **해결 조치**:
+  1. [`frontend/src/app/guide/[jobId]/page.tsx`](file:///i:/Interactive%20Video%20Study%20Guide%20System/frontend/src/app/guide/%5BjobId%5D/page.tsx):
+     - `fetchSiblingPresets`에 **2단계 강력한 Fallback 메커니즘** 탑재 (1차: `/api/guide/presets`, 실패 시 2차: `/api/guide/history`에서 `extractVideoKey` 기반으로 완벽 자동 조립).
+     - `ViewerPresetMatrixModal` 타이틀 정제 로직 강화 (기본 텍스트인 경우 형제 가이드의 실제 유효한 비디오 제목을 우선 탐색 및 적용).
+  2. [`backend/routers/guide.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/routers/guide.py):
+     - `extract_key_for_group` 헬퍼 함수를 추가하여 대시보드의 비디오 키 매칭 알고리즘과 100% 동일하게 일치화.
+  3. **검증**: `npm run build` (Turbopack) 100% 성공 (에러 0건).
 
 ---
 
 ## 3. Notion 문서 관리 현황
 
 1. **[공식 이슈 보드] [📋 Interactive Video Study Guide System 이슈 리포트 (통합 대시보드)](https://app.notion.com/p/3cba8db03fbe80a7972be85c1b2c2202)**:
-   - 📄 [[Bug Report] 가이드 상세 뷰어 내 9종 프리셋 탐색기 미생성 표시 및 매칭 오류](https://app.notion.com/p/Bug-Report-9-In-Progress-3cca8db03fbe81e8a896ec1fcb14d163) (`In Progress` - 사용자 확인 대기 중)
+   - 📄 [[Bug Report] 프리셋 탐색 모달 오픈 시 브라우저 GPU 과부하로 인한 타 탭 비디오 버벅임 이슈](https://app.notion.com/p/Bug-Report-GPU-Resolved-3cca8db03fbe8105ad81dfeb3323d5e5) (`Resolved` - 사용자 검증 완료)
+   - 📄 [[Bug Report] 가이드 상세 뷰어 내 9종 프리셋 탐색기 미생성 표시 및 매칭 오류](https://app.notion.com/p/Bug-Report-9-Resolved-3cca8db03fbe81e8a896ec1fcb14d163) (`Resolved` - 사용자 검증 완료)
    - 📄 [[Bug Report] 2시간 이상 장문 유튜브 영상 가이드 생성 이슈](https://app.notion.com/p/Bug-Report-2-Resolved-3cca8db03fbe81059afada2b6b96d034) (`Resolved`)
    - 📄 [[Bug Report] Vercel 프로덕션 가이드 생성 시 유튜브 봇 감지 오디오 다운로드 실패 이슈](https://app.notion.com/p/Bug-Report-Vercel-Resolved-3cba8db03fbe81e4a59fe0d3e1301b40) (`Resolved`)
 2. **[개발/가동 가이드]**:
