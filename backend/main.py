@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
-load_dotenv(override=True)
+load_dotenv(override=False)
 
 app = FastAPI(
     title="Interactive Video Study Guide API",
@@ -51,6 +51,16 @@ from fastapi import Depends
 async def get_my_profile(current_user: dict = Depends(get_current_user)):
     """Protected endpoint to verify user authentication token."""
     return {"status": "ok", "user": current_user}
+
+@app.on_event("startup")
+def startup_event():
+    try:
+        from backend.services.llm import clean_invalid_cached_chapters
+        cleaned = clean_invalid_cached_chapters()
+        if cleaned > 0:
+            print(f"[Startup] Purged {cleaned} invalid/non-narrative cached chapters.")
+    except Exception as e:
+        print(f"[Startup Warning] Failed cache integrity check: {e}")
 
 from backend.routers import guide, discussion, admin
 

@@ -19,8 +19,13 @@ const extractText = (node: any): string => {
 };
 
 export default function MDXProcedure(props: any) {
-  const rawJson = extractText(props.children).trim();
-  const cleanJson = rawJson.replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '').replace(/`/g, '').trim();
+  const rawJson = extractText(props?.children).trim();
+  const cleanJson = rawJson
+    .replace(/```[\w-]*\n?/g, '')
+    .replace(/```/g, '')
+    .replace(/`/g, '')
+    .replace(/,\s*([\]}])/g, '$1')
+    .trim();
   let data: ProcedureData | null = null;
   
   try {

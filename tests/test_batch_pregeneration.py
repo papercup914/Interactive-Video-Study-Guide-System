@@ -1,6 +1,11 @@
 import os
 import sys
 import unittest
+
+# Ensure tests use local sqlite database instead of remote database
+os.environ["DATABASE_URL"] = "sqlite:///./backend/data/test_jobs.db"
+os.environ["ADMIN_SYNC_SECRET"] = "test_secret_sync_key_1234"
+
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 
@@ -134,8 +139,9 @@ class TestBatchPreGeneration(unittest.TestCase):
         self.assertGreaterEqual(len(presets), 1)
         self.assertEqual(presets[0]["title"], "동기화된 테스트 영상")
 
+    @patch("backend.services.batch_generator.run_batch_pregeneration_pipeline")
     @patch("backend.services.batch_collector.collect_videos_from_source")
-    def test_batch_api_endpoints(self, mock_collect):
+    def test_batch_api_endpoints(self, mock_collect, mock_run_pipeline):
         """FastAPI 배치 관리 라우트 (start, get, list, cancel) 통합 테스트"""
         mock_collect.return_value = ("테스트 플레이리스트", [
             {"id": "demo001", "title": "Demo 1", "duration": "5:00", "url": "https://youtube.com/watch?v=demo001"}
@@ -183,7 +189,8 @@ class TestBatchPreGeneration(unittest.TestCase):
         with self.assertRaises(ValueError):
             process_audio("non_existent_audio.mp3", "Google Gemini", url_hash="test_hash_123")
 
-    def test_batch_start_with_remote_config(self):
+    @patch("backend.services.batch_generator.run_batch_pregeneration_pipeline")
+    def test_batch_start_with_remote_config(self, mock_run_pipeline):
         """운영 서버 URL 및 시크릿 키가 포함된 배치 시작 테스트"""
         start_res = self.client.post(
             "/api/admin/batch/start",

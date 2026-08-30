@@ -18,8 +18,13 @@ const extractText = (node: any): string => {
 };
 
 export default function MDXFeynman(props: any) {
-  const rawJson = extractText(props.children).trim();
-  const cleanJson = rawJson.replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '').replace(/`/g, '').trim();
+  const rawJson = extractText(props?.children).trim();
+  const cleanJson = rawJson
+    .replace(/```[\w-]*\n?/g, '')
+    .replace(/```/g, '')
+    .replace(/`/g, '')
+    .replace(/,\s*([\]}])/g, '$1')
+    .trim();
   let data: FeynmanData | null = null;
   
   try {
@@ -39,12 +44,15 @@ function FeynmanUI({ data }: { data: FeynmanData }) {
   const [strikes, setStrikes] = useState(0);
   const [showSos, setShowSos] = useState(false);
   const [chatHistory, setChatHistory] = useState<{role: 'ai' | 'user', text: string}[]>([
-    { role: 'ai', text: data.initial_ai_message }
+    { role: 'ai', text: data.initial_ai_message || '이 개념을 나만의 언어로 쉽게 설명해 볼까요?' }
   ]);
   const [errorMsg, setErrorMsg] = useState('');
 
   // Volatile State Protection (localStorage)
-  const storageKey = `feynman_draft_${data.concept_summary.substring(0, 20)}`;
+  const summaryPrefix = (data.concept_summary && typeof data.concept_summary === 'string') 
+    ? data.concept_summary.substring(0, 20) 
+    : 'default';
+  const storageKey = `feynman_draft_${summaryPrefix}`;
   
   useEffect(() => {
     const saved = localStorage.getItem(storageKey);

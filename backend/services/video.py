@@ -199,13 +199,14 @@ def _fetch_innertube_captions(video_id: str) -> str | None:
         # 2. 클라이언트 후보군 (ANDROID 20.10.38 최우선)
         clients = [
             {
-                "name": "ANDROID",
+                "clientName": "ANDROID",
                 "clientVersion": "20.10.38",
+                "androidSdkVersion": 34,
                 "hl": "ko",
                 "gl": "KR"
             },
             {
-                "name": "ANDROID_TESTSUITE",
+                "clientName": "ANDROID_TESTSUITE",
                 "clientVersion": "1.9",
                 "hl": "ko",
                 "gl": "KR"
@@ -227,7 +228,7 @@ def _fetch_innertube_captions(video_id: str) -> str | None:
             }
 
             try:
-                r = requests.post(url, json=payload, headers=headers, timeout=8)
+                r = requests.post(url, json=payload, headers=headers, timeout=10)
                 if r.status_code == 200:
                     data = r.json()
                     captions = data.get("captions", {}).get("playerCaptionsTracklistRenderer", {}).get("captionTracks", [])
@@ -250,23 +251,41 @@ def _fetch_innertube_captions(video_id: str) -> str | None:
 
                         base_url = target_track.get("baseUrl")
                         if base_url:
-                            # 한국어 번역 옵션 추가
+                            full_text = None
+                            # 1. 한국어가 아닌 경우 실시간 한국어 번역(&tlang=ko) 우선 시도
                             if "ko" not in target_track.get("languageCode", "").lower():
-                                base_url = f"{base_url}&tlang=ko"
-
-                            sub_r = requests.get(base_url, timeout=8)
-                            if sub_r.status_code == 200 and len(sub_r.text) > 0:
                                 try:
-                                    root = ET.fromstring(sub_r.text)
-                                    texts = [elem.text.strip() for elem in root.iter() if elem.text and elem.text.strip()]
-                                    full_text = html.unescape(" ".join(texts)).strip()
-                                    if full_text and len(full_text) > 30:
-                                        print(f"[Transcript] 0차(Innertube {client_info['name']} API) 성공! ({len(full_text)}자)")
-                                        return full_text
-                                except Exception as parse_err:
-                                    print(f"[Transcript] Innertube XML 파싱 경고: {parse_err}")
+                                    trans_url = f"{base_url}&tlang=ko"
+                                    sub_r = requests.get(trans_url, timeout=15)
+                                    if sub_r.status_code == 200 and len(sub_r.text) > 0:
+                                        root = ET.fromstring(sub_r.text)
+                                        texts = [elem.text.strip() for elem in root.iter() if elem.text and elem.text.strip()]
+                                        candidate = html.unescape(" ".join(texts)).strip()
+                                        if candidate and len(candidate) > 30:
+                                            full_text = candidate
+                                            print(f"[Transcript] 0차(Innertube {client_info.get('clientName', 'ANDROID')} API - 한글 번역) 성공! ({len(full_text)}자)")
+                                except Exception as trans_err:
+                                    print(f"[Transcript] Innertube 실시간 한글 번역 요청 실패/지연 ({trans_err}), 원문 자막으로 Fallback...")
+
+                            # 2. 번역 실패 시 또는 한국어 트랙인 경우 원본 자막(raw track) 직접 다운로드
+                            if not full_text:
+                                try:
+                                    sub_r = requests.get(base_url, timeout=15)
+                                    if sub_r.status_code == 200 and len(sub_r.text) > 0:
+                                        root = ET.fromstring(sub_r.text)
+                                        texts = [elem.text.strip() for elem in root.iter() if elem.text and elem.text.strip()]
+                                        candidate = html.unescape(" ".join(texts)).strip()
+                                        if candidate and len(candidate) > 30:
+                                            full_text = candidate
+                                            lang_code = target_track.get('languageCode', 'raw')
+                                            print(f"[Transcript] 0차(Innertube {client_info.get('clientName', 'ANDROID')} API - {lang_code} 원문) 성공! ({len(full_text)}자)")
+                                except Exception as raw_err:
+                                    print(f"[Transcript] Innertube 원문 자막 다운로드 실패: {raw_err}")
+
+                            if full_text:
+                                return full_text
             except Exception as client_err:
-                print(f"[Transcript] Innertube {client_info['name']} 시도 실패: {client_err}")
+                print(f"[Transcript] Innertube {client_info.get('clientName', 'ANDROID')} 시도 실패: {client_err}")
     except Exception as e:
         print(f"[Transcript] Innertube 모바일 API 전체 실패: {e}")
     return None
@@ -287,15 +306,19 @@ def _extract_transcript_from_list(transcript_list) -> str | None:
             except Exception:
                 pass
 
-        # 3. 영어 자막 -> 한국어 번역
+        # 3. 영어 자막 -> 한국어 번역 시도
         if not transcript:
             try:
                 en_t = transcript_list.find_transcript(['en'])
-                transcript = en_t.translate('ko')
+                try:
+                    transcript = en_t.translate('ko')
+                except Exception:
+                    # 번역 실패 시 영어 원문 자막 사용 (Gemini가 완벽히 한국어로 번역/정리 가능)
+                    transcript = en_t
             except Exception:
                 pass
 
-        # 4. 기타 언어 자막 -> 한국어 번역
+        # 4. 기타 언어 자막 -> 한국어 번역 시도 -> 실패 시 원문 사용
         if not transcript:
             for t in transcript_list:
                 try:

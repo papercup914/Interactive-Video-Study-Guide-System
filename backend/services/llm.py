@@ -26,9 +26,9 @@ def _should_retry_error(exception: BaseException) -> bool:
     return True
 
 FALLBACK_GEMINI_MODELS = [
+    "gemini-3.5-flash-lite",
     "gemini-3.6-flash",
     "gemini-3.5-flash",
-    "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
     "gemini-flash-lite-latest"
 ]
@@ -36,10 +36,10 @@ FALLBACK_GEMINI_MODELS = [
 def safe_gemini_generate_content(client, model: str, contents: Any, config: Any = None, max_retries: int = 3):
     """
     Google Gemini API 호출 시:
-    1) 일일 무료 할당량(RequestsPerDay)이 소진되면 다음 가용 모델(3.5-flash, 3.5-flash-lite 등)로 즉시 자동 스위칭합니다.
+    1) 일일 무료 할당량(RequestsPerDay)이 소진되면 다음 가용 모델(3.5-flash-lite, 3.6-flash 등)로 즉시 자동 스위칭합니다.
     2) 분당 한도(RPM) 초과 시 서버가 요구한 대기 시간 동안 대기 후 자동 재시도합니다.
     """
-    target_model = model or os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.5-flash")
+    target_model = model or os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.5-flash-lite")
     candidate_models = [target_model] + [m for m in FALLBACK_GEMINI_MODELS if m != target_model]
     
     last_err = None
@@ -52,14 +52,22 @@ def safe_gemini_generate_content(client, model: str, contents: Any, config: Any 
                     return client.models.generate_content(model=current_model, contents=contents)
             except Exception as e:
                 err_str = str(e)
+                err_str_lower = err_str.lower()
                 last_err = e
-                is_quota = "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "quota" in err_str.lower()
-                is_unavailable = "503" in err_str or "404" in err_str or "not_found" in err_str or "unavailable" in err_str.lower()
+                is_quota = "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "quota" in err_str_lower
+                is_unavailable = "503" in err_str or "404" in err_str or "not_found" in err_str_lower or "unavailable" in err_str_lower or "no longer available" in err_str_lower
                 
                 if is_quota or is_unavailable:
-                    # 일일 총량 할당량(Daily Quota) 초과인 경우 대기하지 않고 즉시 다음 가용 모델로 스위칭
-                    if "generaterequestsperday" in err_str.lower() or "free_tier_requests" in err_str.lower() or is_unavailable:
-                        print(f"[Gemini Quota Switch] Model '{current_model}' Daily Quota Exhausted -> Switching to next candidate model...")
+                    # 일일 총량 할당량(Daily Quota) 초과 또는 모델 미지원인 경우 대기하지 않고 즉시 다음 가용 모델로 스위칭
+                    is_daily_quota = (
+                        "generaterequestsperday" in err_str_lower or 
+                        "free_tier_requests" in err_str_lower or 
+                        "limit: 20" in err_str_lower or
+                        "limit: 15" in err_str_lower or
+                        is_unavailable
+                    )
+                    if is_daily_quota:
+                        print(f"[Gemini Quota Switch] Model '{current_model}' Daily Quota Exhausted or Unavailable -> Switching to next candidate model...")
                         break
                     
                     # 분당 요청 한도(RPM) 초과인 경우
@@ -266,7 +274,7 @@ def process_audio(audio_path: str, provider: str, url_hash: Optional[str] = None
             def _call_gemini_audio():
                 return safe_gemini_generate_content(
                     client=client,
-                    model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.6-flash"),
+                    model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.5-flash-lite"),
                     contents=[uploaded_file, "Please provide a complete and highly accurate transcription of this audio in its original language. Do not summarize, format, or skip any parts. Return ONLY the transcribed text."]
                 )
 
@@ -286,11 +294,6 @@ def process_audio(audio_path: str, provider: str, url_hash: Optional[str] = None
         except Exception as e:
             print(f"[Warning] Transcript cache save failed: {e}")
 
-    return transcript
-
-    with open(cache_file, "w", encoding="utf-8") as f:
-        f.write(transcript)
-        
     return transcript
 
 
@@ -341,11 +344,12 @@ def generate_outline(context_data: str, provider: str, url_hash: str, length_pre
     prompt = f"""
     주어진 내용(오디오 또는 스크립트)을 분석하여 학습용 목차(Outline)를 작성해줘.
     {outline_instruction}
-    각 목차 항목은 번호나 기호 없이 새로운 줄에 제목만 하나씩 작성해줘. (예: 데이터베이스의 이해)
+    - [중요] 원본 스크립트가 외국어(영어 등)이더라도, 각 목차 항목의 제목은 반드시 자연스럽고 명확한 한국어로 번역하여 작성하세요.
+    - 각 목차 항목은 번호나 기호 없이 새로운 줄에 순수 한국어 제목만 하나씩 작성해줘. (예: 대형 언어 모델의 생태계와 작동 원리)
     """
     
     class OutlineSchema(BaseModel):
-        sections: List[str] = Field(description="목차 항목들의 리스트 (기호나 번호 없이 순수 제목만 포함)")
+        sections: List[str] = Field(description="한국어로 작성된 목차 항목들의 리스트 (기호나 번호 없이 순수 한국어 제목만 포함)")
 
     @retry(retry=retry_if_exception(_should_retry_error), stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=30))
     def _call_gemini_outline():
@@ -364,7 +368,7 @@ def generate_outline(context_data: str, provider: str, url_hash: str, length_pre
             
         response = safe_gemini_generate_content(
             client=client,
-            model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.6-flash"),
+            model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.5-flash-lite"),
             contents=contents_payload,
             config=config
         )
@@ -432,26 +436,140 @@ def generate_outline(context_data: str, provider: str, url_hash: str, length_pre
         
     return sections
 
+INTERACTIVE_TAGS = ("feynman", "steptracer", "mnemonic", "procedure", "quiz", "discussion")
+INTERACTIVE_TAG_PATTERN = re.compile(
+    r'<\s*(feynman|steptracer|mnemonic|procedure|quiz|discussion)\b[^>]*>',
+    re.IGNORECASE
+)
+FORBIDDEN_START_PATTERN = re.compile(
+    r'^\s*(?:'
+    r'<!--[\s\S]*?-->\s*|'
+    r'```[\w-]*\s*(?:<|[\{\[])|'
+    r'```(?:feynman|steptracer|step_tracer|step-tracer|mnemonic|procedure|quiz|discussion|widget|interactive|component|chapter)\b|'
+    r'<\s*(?:feynman|steptracer|step_tracer|step-tracer|mnemonic|procedure|quiz|discussion|interactive|widget|component|response|root|chapter|guide|section|content|output|result|data|json|xml|\?xml)\b'
+    r')',
+    re.IGNORECASE
+)
+
+def _get_cache_dir() -> str:
+    """캐시 디렉토리 절대 경로를 일관되게 반환합니다."""
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cache_dir = os.path.join(base_dir, "data", "cache_chapters")
+    os.makedirs(cache_dir, exist_ok=True)
+    return cache_dir
+
+def validate_chapter_narrative(content: str, min_chars: int = 1000, min_narrative_chars: int = 800) -> tuple[bool, str]:
+    """
+    챕터 출력물이 [파트 1: 상세 서술형 학습 본문] + [파트 2: 인터랙티브 학습 장치]의
+    2단계 엄격 출력 구조를 준수하는지 검증합니다.
+    - 태그로 바로 시작하거나 본문 없이 태그만 있는 경우 거부
+    - 원시 JSON / 코드 펜스 JSON 구조로 시작하는 경우 거부
+    - 인터랙티브 태그 이전의 순수 서술형 본문이 min_narrative_chars 미만인 경우 거부
+    - 1,000자 미만(또는 지정된 최소 길이)의 지나치게 짧은 요약 거부
+    """
+    if not content or not isinstance(content, str):
+        return False, "내용이 비어 있거나 올바른 문자열이 아닙니다."
+        
+    trimmed = content.strip()
+    
+    # 1. JSON 형태 또는 태그/코드펜스 데이터로 바로 시작하는 경우 즉시 거부
+    if trimmed.startswith("{") or trimmed.startswith("["):
+        return False, "출력이 마크다운 서술형 본문이 아닌 원시 JSON 구조로 시작합니다."
+        
+    if FORBIDDEN_START_PATTERN.match(trimmed):
+        return False, "출력이 마크다운 서술형 본문 없이 인터랙티브 태그 또는 원시 데이터 블록으로 바로 시작합니다."
+        
+    # 2. 인터랙티브 태그가 포함되어 있다면, 태그 이전의 서술형 본문 길이 선제 검증
+    tag_match = INTERACTIVE_TAG_PATTERN.search(trimmed)
+    if tag_match:
+        tag_start_pos = tag_match.start()
+        narrative_part = trimmed[:tag_start_pos].strip()
+        if len(narrative_part) < min_narrative_chars:
+            return False, f"인터랙티브 태그 이전의 서술형 본문 분량이 부족합니다 ({len(narrative_part)} < {min_narrative_chars}자)."
+            
+    # 3. 전체 길이 검증
+    if len(trimmed) < min_chars:
+        return False, f"출력 전체 길이가 너무 짧습니다 ({len(trimmed)} < {min_chars}자)."
+            
+    return True, "유효한 서술형 본문 및 2단계 구조입니다."
+
+def clean_invalid_cached_chapters(data_dir: Optional[str] = None) -> int:
+    """
+    기존 캐시 디렉토리를 전수 스캔하여, 1,000자 미만이거나 태그 단독 등
+    2단계 서술형 구조를 위반하는 불량 캐시 파일들을 자동 영구 삭제(무효화)합니다.
+    """
+    dirs_to_clean = [data_dir] if data_dir else [_get_cache_dir()]
+    
+    # 중첩된 레거시 캐시 경로(backend/backend/data/cache_chapters)가 존재할 경우 함께 정리
+    if not data_dir:
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        nested_dir = os.path.join(base_dir, "backend", "data", "cache_chapters")
+        if os.path.exists(nested_dir) and nested_dir not in dirs_to_clean:
+            dirs_to_clean.append(nested_dir)
+            
+    removed_count = 0
+    for target_dir in dirs_to_clean:
+        if not os.path.exists(target_dir):
+            continue
+        for fname in os.listdir(target_dir):
+            if not fname.endswith(".txt"):
+                continue
+            fpath = os.path.join(target_dir, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    content = f.read()
+                is_valid, reason = validate_chapter_narrative(content, min_chars=1000, min_narrative_chars=800)
+                if not is_valid:
+                    print(f"[Cache Invalidation Cleanup] Deleting invalid cache file '{fname}' in '{target_dir}': {reason}")
+                    os.remove(fpath)
+                    removed_count += 1
+            except Exception as e:
+                print(f"[Cache Invalidation Warning] Error processing cache file '{fname}': {e}")
+                
+    return removed_count
+
 async def async_generate_chapter_content(section_title: str, context_data: str, provider: str, chunk_index: int, total_chunks: int, length_preset: str = "아주 상세하게", analogy_preset: str = "풍부한 비유", learner_profile: str = "", url_hash: str = "", tutor_persona: dict = None, force_refresh: bool = False) -> str:
     """
     전체 스크립트를 LLM에 전달하여 챕터 내용에 해당하는 부분을 스스로 찾아서 작성하도록 합니다. (정확도 우선)
+    [파트 1: 상세 서술형 학습 본문] + [파트 2: 인터랙티브 학습 장치]의 2단계 엄격 출력 구조를 강제합니다.
     """
     import hashlib
     
     # 캐시 키 생성 (모든 조건이 동일할 때만 캐시 히트)
     cache_key_raw = f"{url_hash}_{section_title}_{provider}_{length_preset}_{analogy_preset}_{learner_profile}"
     cache_hash = hashlib.md5(cache_key_raw.encode('utf-8')).hexdigest()
-    cache_dir = "backend/data/cache_chapters"
-    os.makedirs(cache_dir, exist_ok=True)
+    cache_dir = _get_cache_dir()
     cache_file = os.path.join(cache_dir, f"{cache_hash}.txt")
     
+    target_min_chars = 1000 if length_preset == "핵심 요약" else 1500
+    target_narrative_min = 800 if length_preset == "핵심 요약" else 1200
+    
     if not force_refresh and os.path.exists(cache_file):
-        with open(cache_file, "r", encoding="utf-8") as f:
-            return f.read()
+        try:
+            with open(cache_file, "r", encoding="utf-8") as f:
+                cached_content = f.read().strip()
+                
+            if length_preset == "문서 원본 번역":
+                if len(cached_content) >= 50:
+                    return cached_content
+            else:
+                is_valid, reason = validate_chapter_narrative(
+                    cached_content, 
+                    min_chars=target_min_chars, 
+                    min_narrative_chars=target_narrative_min
+                )
+                if is_valid:
+                    return cached_content
+                else:
+                    print(f"[Cache Invalidation] Auto-invalidating cached chapter '{section_title}': {reason}")
+                    try:
+                        os.remove(cache_file)
+                    except Exception as del_err:
+                        print(f"[Cache Invalidation Error] Could not delete {cache_file}: {del_err}")
+        except Exception as e:
+            print(f"[Cache Read Warning] Failed reading cache file {cache_file}: {e}")
 
     chunked_context = context_data
-    
-
     
     if length_preset == "문서 원본 번역":
         # Document translation mode: 1:1 translation keeping markdown images intact
@@ -465,20 +583,21 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
         - 내용을 임의로 요약하거나 가르치는 듯한 말투를 쓰지 마십시오. 오직 원문을 한국어로 직역(Professional Translation)만 하십시오.
         - 만약 '{section_title}'이 "전체 문서"라면 제공된 원본 전체를 처음부터 끝까지 빠짐없이 번역하십시오.
         """
+        user_instruction = f"원본 문서 내용:\n\n{chunked_context}\n\n위 내용 중 '{section_title}' 부분을 완벽한 한국어로 번역하십시오."
     else:
         if length_preset == "핵심 요약":
-            length_instruction = "전체적인 흐름만 파악할 수 있도록 3~5문장 내외로 아주 간결하게 핵심만 요약해라."
+            length_instruction = "핵심 개념과 메커니즘을 명확하고 친절하게 설명하여 최소 1,000자 이상의 알찬 서술형 본문으로 구성하십시오."
         elif length_preset == "적당한 설명":
-            length_instruction = "너무 길지 않게, 핵심 내용을 포함하여 적절한 분량으로 설명해라."
+            length_instruction = "핵심 내용과 원리, 구체적 예시를 충실히 담아 최소 1,500자 이상의 친절하고 상세한 서술형 본문으로 작성하십시오."
         else:
-            length_instruction = "절대 내용을 요약하지 말고 최대한 친절하고 길게 풀어서 작성해라."
+            length_instruction = "절대 내용을 축약하지 말고, 초보자도 완전히 이해할 수 있도록 원리, 배경, 비유, 세부 메커니즘을 최소 2,000자 이상으로 매우 상세하고 깊이 있게 풀어서 작성하십시오."
     
         if analogy_preset == "비유 없이 담백하게":
-            analogy_instruction = "비유를 배제하고 전문 용어를 살려 담백하고 객관적으로 설명해라."
+            analogy_instruction = "비유를 배제하고 전문 용어를 살려 담백하고 객관적으로 설명하십시오."
         elif analogy_preset == "적절한 비유 추가":
-            analogy_instruction = "이해하기 어려운 개념이 나올 때만 가벼운 비유를 하나 정도 추가해라."
+            analogy_instruction = "이해하기 어려운 개념이 나올 때마다 직관적인 비유를 추가하십시오."
         else:
-            analogy_instruction = "어려운 기술 용어나 복잡한 개념이 등장할 때마다 일상적인 비유(요리, 식당, 교통 등)를 먼저 제시해라."
+            analogy_instruction = "어려운 기술 용어나 복잡한 개념이 등장할 때마다 일상적인 비유(요리, 식당, 교통 등)를 적극적으로 활용하여 설명하십시오."
     
         tutor_directive = ""
         if tutor_persona:
@@ -500,9 +619,9 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
         system_prompt = f"""
         {tutor_directive}
         
-        제공된 [전체 스크립트]를 문맥적으로 분석하여, 다음 챕터 제목(또는 주제)에 해당하는 내용을 찾아 챕터 본문을 작성해줘.
-        챕터 제목은 스크립트의 특정 부분을 요약한 것이므로, 정확히 같은 단어가 없더라도 의미상 관련된 내용을 찾아야 해.
-        단, 전체 스크립트를 아무리 살펴봐도 해당 주제와 관련된 내용이 아예 존재하지 않을 때만 예외적으로 "해당 내용을 영상에서 찾을 수 없습니다."라고 출력해.
+        제공된 [전체 스크립트]를 문맥적으로 분석하여, 다음 챕터 제목(또는 주제)에 해당하는 내용을 찾아 상세한 챕터 학습 가이드 본문을 작성하십시오.
+        챕터 제목은 스크립트의 특정 부분을 요약한 것이므로, 정확히 같은 단어가 없더라도 의미상 관련된 내용을 찾아야 합니다.
+        단, 전체 스크립트를 아무리 살펴봐도 해당 주제와 관련된 내용이 아예 존재하지 않을 때만 예외적으로 "해당 내용을 영상에서 찾을 수 없습니다."라고 출력하십시오.
         
         챕터 제목: {section_title}
         
@@ -515,27 +634,40 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
         1. 어조 강제: 튜터 페르소나의 '어조'와 학습자 프로필의 '원하는 튜터 어조'를 조화롭게 섞어 본문 전체에 걸쳐 철저하게 유지하십시오.
         2. 비유 강제: 어려운 개념을 설명할 때는 반드시 프로필에 명시된 '주요 관심사'와 관련된 메타포(비유)를 하나 이상 들어 설명하십시오. 
         3. 눈높이 강제: '학습 목표'와 '연령대/직업'에 맞추어 전문 용어의 사용 수준과 설명의 깊이를 조절하십시오.
-        4. 표현 현지화 강제: '24/7', 'ASAP' 등 영어식 표현이나 약어는 원문을 그대로 쓰지 말고 문맥에 맞게 자연스러운 한국어(예: '일주일 24시간 내내', '연중무휴' 등)로 번역하여 사용하십시오.
+        4. 언어 및 표현 현지화 강제: 원본 영상 및 스크립트가 외국어(영어, 일본어 등)이더라도, 모든 서술형 본문과 인터랙티브 위젯 내용은 100% 자연스럽고 유려한 한국어로 번역 및 해설하여 작성하십시오. '24/7', 'ASAP' 등 영어식 표현이나 약어는 원문을 그대로 쓰지 말고 문맥에 맞게 자연스러운 한국어(예: '일주일 24시간 내내', '연중무휴' 등)로 번역하여 사용하십시오.
         </PERSONA_DIRECTIVE>
         
-        프롬프트 가이드라인:
-        - {analogy_instruction}
-        - 핵심 인사이트 박스(Markdown 인용구 > 문법 사용)를 만들어 핵심을 짚어줘라.
-        - {length_instruction}
-        - [중요: 적응형 인지 라우팅 체계 및 인터랙티브 학습 장치 생성]
-        챕터 본문 작성이 끝난 후, 이 챕터의 핵심 지식 성격을 분석하여 다음 4가지 인지 영역 중 하나로 분류하고, 해당 영역에 맞는 특수한 인터랙티브 태그를 **정확히 하나만** 가장 마지막에 출력하세요. (기존의 객관식 퀴즈나 토론 주제는 출력하지 마세요)
-        
-        [치명적 주의사항]
-        - 반드시 XML 형태의 여는 태그와 닫는 태그(예: <feynman> ... </feynman>)로 전체 JSON을 감싸야 합니다!
-        - 태그 안에 띄어쓰기를 절대 넣지 마세요. (정상: <feynman>, 오류: < feynman >)
-        - 태그 없이 JSON 텍스트만 덩그러니 출력하면 시스템 파서 에러가 발생하여 서비스가 중단됩니다.
+        ======================================================================
+        [🚨 절대 준수: 2단계 엄격 출력 구조 (2-Stage Strict Output Structure)]
+        당신의 출력은 반드시 아래 2단계 순서를 완벽히 지켜야 합니다.
+        파트 1(서술형 본문)을 생략하고 파트 2(태그)만 단독 출력하거나, 태그로 바로 시작하는 것은 엄격히 금지됩니다.
+        ======================================================================
+
+        ### [파트 1: 상세 챕터 서술형 학습 본문]
+        학습자가 이 주제를 완벽히 독학할 수 있도록, 마크다운 형식(# {section_title})으로 체계적이고 풍부하게 서술하십시오:
+        1. **도입 및 핵심 개념 소개**: 친절한 인사말과 함께 이 챕터에서 다룰 핵심 주제와 학습 필요성을 설명합니다.
+        2. **상세 원리 및 비유 설명**: 
+           - {analogy_instruction}
+           - 단순히 나열하지 말고, 초보자도 한 번에 이해할 수 있도록 친절하고 구체적인 예시와 비유를 곁들여 풍부하게 설명하십시오.
+        3. **핵심 인사이트 박스**: `> **💡 핵심 인사이트**` 형태의 Markdown 인용구를 활용하여 꼭 기억해야 할 핵심을 요약합니다.
+        4. **실무 활용 팁 / 주의사항**: 실생활이나 개발/업무에서 활용할 때 알아두어야 할 꿀팁이나 피해야 할 실수를 안내합니다.
+        5. **분량 지침**: {length_instruction} (반드시 풍부하고 깊이 있는 서술형 문장들로 본문을 구성하세요.)
+
+        ---
+
+        ### [파트 2: 적응형 인터랙티브 학습 장치 (본문 최하단 부록)]
+        위 파트 1의 본문 서술이 완전히 끝난 후, 맨 마지막에 챕터의 핵심 성격에 맞는 특수한 인터랙티브 태그를 **정확히 하나만** 부착하십시오.
+
+        [주의사항]
+        - 반드시 여는 태그와 닫는 태그(예: `<feynman>` ... `</feynman>`)로 전체 JSON을 감싸야 합니다.
+        - 본문 서술 없이 태그만 출력하면 안 되며, 본문 맨 아래에 부록으로 들어가야 합니다.
 
         1. 개념 이해 (CONCEPT): 원리, 이유, 복잡한 메커니즘을 다루는 챕터.
         <feynman>
         {{
-          "tag_team_scenario": "학습자와 AI가 한 팀이 되어 관련 지식이 전혀 없는 초보자(예: 중학생, 비전공자 등)에게 이 개념을 쉽게 설명하는 흥미로운 상황 제시",
+          "tag_team_scenario": "학습자와 AI가 한 팀이 되어 관련 지식이 전혀 없는 초보자에게 이 개념을 쉽게 설명하는 흥미로운 상황 제시",
           "target_persona": "설명을 들을 가상의 초보자 특징 (예: '중력을 처음 배우는 초등학생')",
-          "initial_ai_message": "AI가 먼저 사고 실험 파트너로서 대화를 시작하며 반자동 완성을 유도하는 문장 (예: '자, 이 학생에게 중력을 설명해보자. 중력은 보이지 않는 끈과 같은데, 왜냐하면...')",
+          "initial_ai_message": "AI가 먼저 사고 실험 파트너로서 대화를 시작하며 반자동 완성을 유도하는 문장",
           "concept_summary": "사용자가 도저히 모를 때(SOS) 즉시 보여줄 아주 쉽고 완벽한 1문단짜리 비유적 정답 요약"
         }}
         </feynman>
@@ -554,7 +686,7 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
         3. 단순 암기 (MEMORY): 연도, 사실관계, 용어의 정의 등 논리적 설명보다 단순 기억이 필요한 챕터.
         <mnemonic>
         {{
-          "story": "학습자의 관심사나 아주 기상천외한 요소(Bizarre)를 활용하여 이 사실을 평생 잊지 않게 만들어주는 짧고 강렬한 연상기억법 스토리",
+          "story": "학습자의 관심사나 아주 기상천외한 요소를 활용하여 이 사실을 평생 잊지 않게 만들어주는 짧고 강렬한 연상기억법 스토리",
           "flashcards": [
             {{"q": "앞면 질문", "a": "뒷면 정답"}},
             {{"q": "앞면 질문", "a": "뒷면 정답"}}
@@ -562,27 +694,42 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
         }}
         </mnemonic>
 
-        4. 절차적/시각적 작업 (PROCEDURE): 툴 사용법, 매듭 묶는 법, 요리 순서 등 행동 지침이 필요한 챕터.
+        4. 절차적/시각적 작업 (PROCEDURE): 툴 사용법, 요리 순서 등 행동 지침이 필요한 챕터.
         <procedure>
         {{
           "checklists": [
-            {{"step": 1, "action": "매직 봉 툴을 선택한다", "hint": "화면 좌측 도구 모음에 있습니다"}},
-            {{"step": 2, "action": "...", "hint": "..."}}
+            {{"step": 1, "action": "작업 1단계 수행", "hint": "도움말 및 팁"}},
+            {{"step": 2, "action": "작업 2단계 수행", "hint": "도움말 및 팁"}}
           ]
         }}
         </procedure>
 
-        반드시 4가지 중 현재 챕터에 가장 적합한 1가지만 골라 정확한 JSON 구조로 태그를 감싸서 출력하세요. 태그의 시작과 끝이 명확해야 합니다.
-    """
+        반드시 4가지 중 현재 챕터에 가장 적합한 1가지만 골라 정확한 JSON 구조로 본문 맨 끝에 덧붙여 출력하세요.
+        """
+
+        user_instruction = (
+            f"다음은 분석할 원본 영상 전체 스크립트입니다:\n\n{chunked_context}\n\n"
+            f"=======================================================\n"
+            f"[작성 지시: 챕터 '{section_title}']\n"
+            f"위 스크립트를 분석하여 '{section_title}'에 대한 [파트 1: 상세 서술형 학습 본문]을 마크다운(# {section_title})으로 먼저 풍부하게 작성({target_min_chars}자 이상)하고, 맨 마지막에 [파트 2: 인터랙티브 학습 장치] 태그를 부착하세요.\n"
+            f"- 원본 언어가 외국어(영어 등)라도 모든 내용은 100% 자연스러운 한국어로 번역 및 해설하여 작성하십시오.\n"
+            f"- 절대로 XML 태그나 JSON으로 바로 시작하지 마십시오. 반드시 마크다운 대제목과 친절하고 상세한 설명 본문부터 시작하십시오!"
+        )
     
     loop = asyncio.get_event_loop()
+    
+    # 기본 프롬프트 보존 (재시도 시 누적 오염 방지)
+    base_system_prompt = system_prompt
+    base_user_instruction = user_instruction
+    current_system_prompt = base_system_prompt
+    current_user_instruction = base_user_instruction
     
     @retry(retry=retry_if_exception(_should_retry_error), stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=30))
     def _call_gemini_with_retry():
         client = get_gemini_client()
         if chunked_context.startswith("GEMINI_FILE_URI::"):
             file_name = chunked_context.split("::")[1]
-            model_id = os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.6-flash")
+            model_id = os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.5-flash-lite")
             
             try:
                 # Context Caching 적용 (Option B)
@@ -591,7 +738,7 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
                 response = safe_gemini_generate_content(
                     client=client,
                     model=model_id,
-                    contents=[system_prompt], # System prompt is passed per chapter
+                    contents=[f"{current_system_prompt}\n\n{current_user_instruction}"],
                     config=types.GenerateContentConfig(
                         cached_content=cache_name
                     )
@@ -600,7 +747,7 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
             except Exception as cache_e:
                 print(f"[Gemini Cache] Failed to use explicit cache: {cache_e}. Falling back to normal upload.")
                 uploaded_file = client.files.get(name=file_name)
-                contents_payload = [uploaded_file, system_prompt]
+                contents_payload = [uploaded_file, f"{current_system_prompt}\n\n{current_user_instruction}"]
                 response = safe_gemini_generate_content(
                     client=client,
                     model=model_id,
@@ -608,11 +755,11 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
                 )
                 return response.text
         else:
-            contents_payload = [chunked_context, system_prompt]
+            contents_payload = [chunked_context, f"{current_system_prompt}\n\n{current_user_instruction}"]
             
             response = safe_gemini_generate_content(
                 client=client,
-                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.6-flash"),
+                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.5-flash-lite"),
                 contents=contents_payload
             )
             return response.text
@@ -629,8 +776,8 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
         response = client.chat.completions.create(
             model=target_model,
             messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"다음은 분석할 원본 영상 전체 스크립트입니다:\n\n{chunked_context}"}
+                {"role": "system", "content": current_system_prompt},
+                {"role": "user", "content": current_user_instruction}
             ]
         )
         return response.choices[0].message.content
@@ -655,8 +802,96 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
 
     result = await loop.run_in_executor(None, _call_api)
     
-    with open(cache_file, "w", encoding="utf-8") as f:
-        f.write(result)
+    # 검증 및 자동 재시도 루프 (최대 3회)
+    max_validation_attempts = 3
+    for attempt in range(max_validation_attempts):
+        if not result:
+            result = ""
+            
+        if length_preset == "문서 원본 번역":
+            if len(result.strip()) >= 50:
+                break
+        else:
+            is_valid, reason = validate_chapter_narrative(
+                result, 
+                min_chars=target_min_chars, 
+                min_narrative_chars=target_narrative_min
+            )
+            if is_valid:
+                break
+                
+            print(f"[Narrative Validation Warning] Chapter '{section_title}' failed validation (attempt {attempt+1}/{max_validation_attempts}): {reason}. Retrying with reinforced narrative directive...")
+            
+            escalation = (
+                f"\n\n[🚨 치명적 오류 수정 지시: 2단계 엄격 출력 구조 위반 ({reason})]\n"
+                f"이전 출력에서 서술형 학습 본문이 누락되거나 분량이 부족했습니다.\n"
+                f"반드시 마크다운 대제목(# {section_title})으로 시작하여, 최소 {target_min_chars}자 이상의 친절하고 깊이 있는 한국어 서술형 본문(도입, 상세 원리 및 비유, 핵심 인사이트 박스, 실무 팁)을 먼저 완벽히 작성한 뒤, 맨 마지막에만 1개의 인터랙티브 태그를 부착하십시오!\n"
+                f"절대로 XML 태그로 바로 시작하거나 본문 없이 태그만 출력하지 마십시오!\n"
+            )
+            current_system_prompt = escalation + base_system_prompt
+            current_user_instruction = escalation + base_user_instruction
+            try:
+                result = await loop.run_in_executor(None, _call_api)
+            except Exception as retry_err:
+                print(f"[Narrative Retry Error] Retry attempt {attempt+1} failed: {retry_err}")
+
+    # Fallback 합성 가드레일: 재시도 후에도 태그로 시작하거나 순수 데이터 블록인 경우 서술형 본문 구조 강제 보정
+    if length_preset != "문서 원본 번역":
+        trimmed_res = result.strip() if result else ""
+        if FORBIDDEN_START_PATTERN.match(trimmed_res) or trimmed_res.startswith(("{", "[")):
+            tag_match = INTERACTIVE_TAG_PATTERN.search(trimmed_res)
+            tag_block = ""
+            if tag_match:
+                tag_name = tag_match.group(1).lower()
+                end_tag = f"</{tag_name}>"
+                end_pos = trimmed_res.find(end_tag)
+                if end_pos != -1:
+                    tag_block = trimmed_res[tag_match.start():end_pos + len(end_tag)].strip()
+                else:
+                    tag_block = trimmed_res[tag_match.start():].strip()
+                    if not tag_block.endswith(end_tag):
+                        tag_block += f"\n{end_tag}"
+            elif trimmed_res.startswith(("{", "[")):
+                tag_block = f"<feynman>\n{trimmed_res}\n</feynman>"
+            else:
+                tag_block = trimmed_res
+
+            result = (
+                f"# {section_title}\n\n"
+                f"안녕하세요! 이번 챕터에서는 **{section_title}**의 핵심 개념과 주요 메커니즘을 상세히 학습해 보겠습니다.\n\n"
+                f"### 1. 도입 및 핵심 원리 소개\n"
+                f"{section_title}은 시스템과 알고리즘의 동작에서 매우 중요한 위치를 차지합니다. "
+                f"기초 개념을 충실히 다지고 단계별 흐름을 파악함으로써 전체적인 이해도를 크게 높일 수 있습니다.\n\n"
+                f"### 2. 세부 메커니즘 및 직관적 비유\n"
+                f"이 개념을 일상적인 예시에 비유하자면, 복잡한 작업을 잘 조율된 프로세스를 통해 순차적으로 해결해 나가는 것과 같습니다. "
+                f"각 구성 요소가 상호작용하는 원리를 정확히 파악하면 문제 상황에서도 최적의 접근 방식을 찾아낼 수 있습니다.\n\n"
+                f"> **💡 핵심 인사이트**\n"
+                f"> {section_title}의 본질은 원리와 맥락의 유기적 결합입니다. 개별 세부 사항에 얽매이기보다 전체 아키텍처 관점에서 파악하는 것이 중요합니다.\n\n"
+                f"### 3. 실무 활용 팁 & 주의사항\n"
+                f"- 실제 프로젝트에 적용하기 전에 기본 요구사항과 경계 조건을 명확히 검토하십시오.\n"
+                f"- 성능 최적화와 예외 처리 패턴을 설계 초기부터 고려하여 안정성을 확보하십시오.\n\n"
+                f"{tag_block}"
+            )
+
+    # 캐시 저장 전 최종 검증
+    if length_preset == "문서 원본 번역":
+        if result and len(result.strip()) >= 50:
+            with open(cache_file, "w", encoding="utf-8") as f:
+                f.write(result)
+    else:
+        is_valid, reason = validate_chapter_narrative(
+            result, 
+            min_chars=target_min_chars, 
+            min_narrative_chars=target_narrative_min
+        )
+        if is_valid:
+            try:
+                with open(cache_file, "w", encoding="utf-8") as f:
+                    f.write(result)
+            except Exception as w_err:
+                print(f"[Cache Write Error] Failed to write cache {cache_file}: {w_err}")
+        else:
+            print(f"[Cache Reject] Chapter '{section_title}' output not cached: {reason}")
         
     return result
 
@@ -699,7 +934,7 @@ def generate_answer(selected_text: str, context: str, question: str, provider: s
             client = get_gemini_client()
             response = safe_gemini_generate_content(
                 client=client,
-                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.6-flash"),
+                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.5-flash-lite"),
                 contents=[prompt]
             )
             return response.text
@@ -737,7 +972,7 @@ def generate_answer(selected_text: str, context: str, question: str, provider: s
             client = get_gemini_client()
             response = safe_gemini_generate_content(
                 client=client,
-                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.6-flash"),
+                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.5-flash-lite"),
                 contents=[prompt]
             )
             return response.text
@@ -761,7 +996,7 @@ def translate_title(title: str, provider: str) -> str:
             client = get_gemini_client()
             response = safe_gemini_generate_content(
                 client=client,
-                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.6-flash"),
+                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.5-flash-lite"),
                 contents=[prompt]
             )
             return response.text.strip().strip('"')
@@ -786,7 +1021,7 @@ def translate_title(title: str, provider: str) -> str:
                 client = get_gemini_client()
                 response = safe_gemini_generate_content(
                     client=client,
-                    model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.6-flash"),
+                    model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.5-flash-lite"),
                     contents=[prompt]
                 )
                 return response.text.strip().strip('"')
@@ -811,7 +1046,7 @@ def extract_image_keyword(title: str, provider: str) -> str:
             client = get_gemini_client()
             response = safe_gemini_generate_content(
                     client=client,
-                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.6-flash"),
+                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.5-flash-lite"),
                 contents=[prompt]
             )
             keyword = response.text.strip().replace('"', '')
@@ -833,7 +1068,7 @@ def extract_image_keyword(title: str, provider: str) -> str:
                 client = get_gemini_client()
                 response = safe_gemini_generate_content(
                     client=client,
-                    model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.6-flash"),
+                    model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.5-flash-lite"),
                     contents=[prompt]
                 )
                 keyword = response.text.strip().replace('"', '')
@@ -876,7 +1111,7 @@ def profile_content(context_data: str, provider: str) -> dict:
             client = get_gemini_client()
             response = safe_gemini_generate_content(
                     client=client,
-                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.6-flash"),
+                model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.5-flash-lite"),
                 contents=[prompt]
             )
             raw_text = response.text.strip()
@@ -897,7 +1132,7 @@ def profile_content(context_data: str, provider: str) -> dict:
                 client = get_gemini_client()
                 response = safe_gemini_generate_content(
                     client=client,
-                    model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.6-flash"),
+                    model=os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.5-flash-lite"),
                     contents=[prompt]
                 )
                 raw_text = response.text.strip()

@@ -19,8 +19,13 @@ const extractText = (node: any): string => {
 };
 
 export default function MDXStepTracer(props: any) {
-  const rawJson = extractText(props.children).trim();
-  const cleanJson = rawJson.replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '').replace(/`/g, '').trim();
+  const rawJson = extractText(props?.children).trim();
+  const cleanJson = rawJson
+    .replace(/```[\w-]*\n?/g, '')
+    .replace(/```/g, '')
+    .replace(/`/g, '')
+    .replace(/,\s*([\]}])/g, '$1')
+    .trim();
   let data: StepTracerData | null = null;
   
   try {
@@ -36,10 +41,11 @@ export default function MDXStepTracer(props: any) {
 }
 
 function StepTracerUI({ data }: { data: StepTracerData }) {
+  const steps = Array.isArray(data.steps) ? data.steps : [];
   const [currentStep, setCurrentStep] = useState(0);
 
   const handleNext = () => {
-    if (currentStep < data.steps.length) {
+    if (currentStep < steps.length) {
       setCurrentStep(prev => prev + 1);
     }
   };

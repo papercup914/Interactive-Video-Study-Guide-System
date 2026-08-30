@@ -11,8 +11,22 @@ def extract_text_from_web(url: str):
     Scrape text from a webpage using r.jina.ai for high quality markdown.
     Returns (transcript, title).
     """
+    if not url or not isinstance(url, str):
+        raise ValueError("유효하지 않은 URL입니다.")
+        
+    target_url = url.strip()
+    # 유튜브 단축 URL 또는 파라미터가 포함된 경우 표준 URL로 정규화
+    if "youtu.be" in target_url or "youtube.com" in target_url:
+        try:
+            from backend.services.video import extract_video_id
+            vid = extract_video_id(target_url)
+            if vid:
+                target_url = f"https://www.youtube.com/watch?v={vid}"
+        except Exception:
+            pass
+
     try:
-        jina_url = f"https://r.jina.ai/{url}"
+        jina_url = f"https://r.jina.ai/{target_url}"
         headers = {
             "Accept": "application/json",
             "X-Return-Format": "markdown", # Ensures we get markdown with images
@@ -27,10 +41,13 @@ def extract_text_from_web(url: str):
         response.raise_for_status()
         
         data = response.json()
-        if data.get("code") == 200:
-            content = data["data"]["content"]
-            title = data["data"].get("title", url)
-            return content, title
+        if data.get("code") == 200 and data.get("data"):
+            content = data["data"].get("content", "")
+            title = data["data"].get("title", target_url)
+            if content and len(content.strip()) >= 200:
+                return content.strip(), title
+            else:
+                raise Exception(f"Jina Reader로 추출된 텍스트가 너무 짧습니다 ({len(content) if content else 0}자).")
         else:
             raise Exception(f"Jina API returned error: {data}")
             
@@ -40,18 +57,18 @@ def extract_text_from_web(url: str):
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(target_url, headers=headers, timeout=10)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
-        title = soup.title.string if soup.title else url
+        title = (soup.title.string if soup.title else target_url) or target_url
         for script in soup(["script", "style", "nav", "footer", "header", "aside"]):
             script.extract()
         text = soup.get_text(separator='\n')
         lines = (line.strip() for line in text.splitlines())
         chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
         text = '\n'.join(chunk for chunk in chunks if chunk)
-        if len(text) < 50:
-            raise Exception("가져올 수 없습니다 (내용이 너무 짧거나 크롤링이 차단된 페이지입니다).")
+        if len(text) < 100:
+            raise Exception("웹 페이지에서 충분한 본문 텍스트를 가져올 수 없습니다 (내용이 너무 짧거나 크롤링이 차단된 페이지입니다).")
         return text, title
 
 

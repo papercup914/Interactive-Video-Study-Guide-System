@@ -10,7 +10,7 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
     # This is a port of the old `_generate_guide_task` from guide.py
     from backend.services.job_manager import update_job_status, finish_job, fail_job, get_job, save_study_guide, get_completed_chapters, save_chapter_checkpoint
     from backend.services.video import download_audio, get_youtube_transcript, get_url_hash, get_video_metadata
-    from backend.services.llm import process_audio, generate_outline, async_generate_chapter_content, profile_content, translate_title, is_gemini_provider
+    from backend.services.llm import process_audio, generate_outline, async_generate_chapter_content, profile_content, translate_title, is_gemini_provider, validate_chapter_narrative
     from backend.services.source import extract_text_from_pdf, extract_text_from_web
     
     start_time = time.time()
@@ -64,13 +64,17 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
                 raw_title = f"{raw_title} 외 {len(file_paths)-1}건"
         elif "youtube.com" in url or "youtu.be" in url:
             update_job_status(job_id, "transcribing", "유튜브 자막 및 오디오 추출 중...")
-            transcript = await loop.run_in_executor(None, get_youtube_transcript, url)
-            url_hash = get_url_hash(url) if transcript else None
+            from backend.services.video import extract_video_id
+            vid = extract_video_id(url)
+            canonical_url = f"https://www.youtube.com/watch?v={vid}" if vid else url
             
-            if not transcript:
+            transcript = await loop.run_in_executor(None, get_youtube_transcript, canonical_url)
+            url_hash = get_url_hash(canonical_url) if transcript else None
+            
+            if not transcript or len(transcript.strip()) < 50:
                 update_job_status(job_id, "downloading_audio", "자막 없음. 오디오 다운로드 시도 중...")
                 try:
-                    audio_path = await loop.run_in_executor(None, download_audio, url)
+                    audio_path = await loop.run_in_executor(None, download_audio, canonical_url)
                     update_job_status(job_id, "transcribing", "오디오 텍스트 변환(Whisper/Gemini) 중...")
                     transcript = await loop.run_in_executor(None, process_audio, audio_path, provider)
                     url_hash = os.path.splitext(os.path.basename(audio_path))[0]
@@ -78,15 +82,15 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
                     print(f"[Tasks] YouTube audio download failed/blocked: {audio_err}. Falling back to Jina Reader...")
                     update_job_status(job_id, "transcribing", "클라우드 환경 우회: 웹 분석 엔진(Jina Reader)으로 영상 정보 추출 중...")
                     try:
-                        transcript, jina_title = await loop.run_in_executor(None, extract_text_from_web, url)
-                        url_hash = get_url_hash(url)
+                        transcript, jina_title = await loop.run_in_executor(None, extract_text_from_web, canonical_url)
+                        url_hash = get_url_hash(canonical_url)
                         if not raw_title or raw_title == "제목 알 수 없음":
                             raw_title = jina_title
                     except Exception as jina_err:
                         print(f"[Tasks] Jina fallback failed: {jina_err}")
                         raise audio_err
                 
-            metadata = await loop.run_in_executor(None, get_video_metadata, url)
+            metadata = await loop.run_in_executor(None, get_video_metadata, canonical_url)
             if metadata and metadata.get("title") and metadata["title"] != "제목 알 수 없음":
                 raw_title = metadata["title"]
                 video_duration = metadata.get("duration", 0)
@@ -158,10 +162,25 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
                 if job and job.get("status") == "cancelled":
                     return
                 
+                cp_min_chars = 1000 if length_preset == "핵심 요약" else 1500
+                cp_min_narrative = 800 if length_preset == "핵심 요약" else 1200
+                
                 if section_title in completed_chapters:
-                    print(f"[Harness] Checkpoint loaded for {section_title}, skipping API call.")
-                    document[section_title] = completed_chapters[section_title]
-                    return
+                    cached_cp = completed_chapters[section_title]
+                    if length_preset == "문서 원본 번역":
+                        is_valid = bool(cached_cp and len(cached_cp.strip()) >= 50)
+                    else:
+                        is_valid, _ = validate_chapter_narrative(
+                            cached_cp, 
+                            min_chars=cp_min_chars, 
+                            min_narrative_chars=cp_min_narrative
+                        )
+                    if is_valid:
+                        print(f"[Harness] Valid checkpoint loaded for {section_title}, skipping API call.")
+                        document[section_title] = cached_cp
+                        return
+                    else:
+                        print(f"[Harness] Checkpoint for {section_title} was invalid/tag-only. Re-generating...")
 
                 update_job_status(job_id, "generating_chapters", f"[{idx+1}/{total_sections}] 챕터 생성 중...")
                 content = await async_generate_chapter_content(
@@ -169,19 +188,28 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
                     length_preset, analogy_preset, learner_profile, url_hash,
                     tutor_persona, force_refresh
                 )
-                if content:
+                if content and content.strip():
                     document[section_title] = content
-                    save_chapter_checkpoint(job_id, section_title, content)
+                    if length_preset == "문서 원본 번역" or validate_chapter_narrative(content, min_chars=cp_min_chars, min_narrative_chars=cp_min_narrative)[0]:
+                        save_chapter_checkpoint(job_id, section_title, content)
+                else:
+                    document[section_title] = (
+                        f"# {section_title}\n\n"
+                        f"> [!WARNING]\n"
+                        f"> 챕터 내용을 생성하는 중 응답이 비어 있었습니다. 다시 생성을 시도해 주세요."
+                    )
                 
         tasks = [process_section(i, section) for i, section in enumerate(sections)]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
         for i, res in enumerate(results):
+            section_title = sections[i]
             if isinstance(res, Exception):
                 print(f"Warning: Section {i+1} failed completely despite retries: {res}")
-                section_title = sections[i]
                 error_detail = str(res)
-                document[section_title] = f"> [!WARNING]\n> 챕터 생성 중 내부 에러가 발생했습니다.\n> 에러 원인: `{error_detail}`\n\n추후 서버를 재시작하거나 설정(.env)을 확인한 뒤 다시 시도해주세요."
+                document[section_title] = f"# {section_title}\n\n> [!WARNING]\n> 챕터 생성 중 내부 에러가 발생했습니다.\n> 에러 원인: `{error_detail}`\n\n추후 서버를 재시작하거나 설정(.env)을 확인한 뒤 다시 시도해주세요."
+            elif section_title not in document:
+                document[section_title] = f"# {section_title}\n\n> [!WARNING]\n> 챕터 내용이 정상적으로 준비되지 않았습니다. 새로고침 후 다시 시도해주세요."
         
         job = get_job(job_id)
         if job and job.get("status") == "cancelled":

@@ -19,8 +19,13 @@ const extractText = (node: any): string => {
 };
 
 export default function MDXMnemonic(props: any) {
-  const rawJson = extractText(props.children).trim();
-  const cleanJson = rawJson.replace(/```[a-zA-Z]*\n?/g, '').replace(/```/g, '').replace(/`/g, '').trim();
+  const rawJson = extractText(props?.children).trim();
+  const cleanJson = rawJson
+    .replace(/```[\w-]*\n?/g, '')
+    .replace(/```/g, '')
+    .replace(/`/g, '')
+    .replace(/,\s*([\]}])/g, '$1')
+    .trim();
   let data: MnemonicData | null = null;
   
   try {
@@ -30,26 +35,29 @@ export default function MDXMnemonic(props: any) {
     return <div className="p-4 bg-amber-500/10 text-amber-600 rounded-xl my-4 text-sm font-bold border border-amber-500/20">⚠️ AI가 생성한 인터랙티브 요소를 불러올 수 없습니다. (형식 오류)</div>;
   }
 
-  if (!data) return null;
+  if (!data || (!data.story && (!data.flashcards || data.flashcards.length === 0))) return null;
 
   return <MnemonicUI data={data} />;
 }
 
 function MnemonicUI({ data }: { data: MnemonicData }) {
+  const flashcards = Array.isArray(data.flashcards) ? data.flashcards : [];
   const [currentCard, setCurrentCard] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
 
   const handleNext = () => {
+    if (flashcards.length <= 1) return;
     setIsFlipped(false);
     setTimeout(() => {
-      setCurrentCard((prev) => (prev + 1) % data.flashcards.length);
+      setCurrentCard((prev) => (prev + 1) % flashcards.length);
     }, 150);
   };
 
   const handlePrev = () => {
+    if (flashcards.length <= 1) return;
     setIsFlipped(false);
     setTimeout(() => {
-      setCurrentCard((prev) => (prev - 1 + data.flashcards.length) % data.flashcards.length);
+      setCurrentCard((prev) => (prev - 1 + flashcards.length) % flashcards.length);
     }, 150);
   };
 

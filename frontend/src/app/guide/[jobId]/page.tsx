@@ -663,6 +663,12 @@ export default function GuideViewer({ params }: { params: Promise<{ jobId: strin
     // Fix CommonMark parsing bug with Korean particles attached to markdown markers.
     processed = processed.replace(/(\*\*|__|\*|_)(?=[가-힣])/g, '$1<!-- -->');
     
+    // Normalize hyphenated/underscored custom tag names (e.g. <step_tracer>, <step-tracer> -> <steptracer>)
+    processed = processed.replace(/<\s*(\/?)\s*(?:step[-_]tracer|steptracer)\b([^>]*)>/gi, '<$1steptracer$2>');
+    
+    // Unwrap markdown code fences (```xml ... ``` or ```json ... ``` or ```feynman ... ```) wrapping custom tags so they render as interactive components
+    processed = processed.replace(/```[\w-]*\s*\n?\s*(<(?:quiz|feynman|steptracer|mnemonic|procedure|discussion)[\s\S]*?<\/(?:quiz|feynman|steptracer|mnemonic|procedure|discussion)>)\s*(?:```)?/gi, '$1');
+    
     const tagsToProcess = ['quiz', 'feynman', 'steptracer', 'mnemonic', 'procedure'];
     tagsToProcess.forEach(tag => {
       // Normalize tag spaces (e.g. < feynman > -> <feynman>)
@@ -673,12 +679,23 @@ export default function GuideViewer({ params }: { params: Promise<{ jobId: strin
       if (tag === 'feynman') {
         const rawJsonFeynmanRegex = /{\s*"tag_team_scenario"[\s\S]*?}/gi;
         processed = processed.replace(rawJsonFeynmanRegex, (match) => {
-          // Only wrap if it's not already inside a <feynman> tag
+          if (processed.indexOf(`<${tag}>`) !== -1) return match;
+          return `\n<${tag}>\n${match}\n</${tag}>\n`;
+        });
+      } else if (tag === 'steptracer') {
+        const rawJsonStepRegex = /{\s*"(?:scenario|steps)"[\s\S]*?}/gi;
+        processed = processed.replace(rawJsonStepRegex, (match) => {
+          if (processed.indexOf(`<${tag}>`) !== -1) return match;
+          return `\n<${tag}>\n${match}\n</${tag}>\n`;
+        });
+      } else if (tag === 'mnemonic') {
+        const rawJsonMnemRegex = /{\s*"(?:story|flashcards)"[\s\S]*?}/gi;
+        processed = processed.replace(rawJsonMnemRegex, (match) => {
           if (processed.indexOf(`<${tag}>`) !== -1) return match;
           return `\n<${tag}>\n${match}\n</${tag}>\n`;
         });
       } else if (tag === 'procedure') {
-        const rawJsonProcRegex = /{\s*"overall_goal"[\s\S]*?}/gi;
+        const rawJsonProcRegex = /{\s*"(?:checklists|overall_goal)"[\s\S]*?}/gi;
         processed = processed.replace(rawJsonProcRegex, (match) => {
           if (processed.indexOf(`<${tag}>`) !== -1) return match;
           return `\n<${tag}>\n${match}\n</${tag}>\n`;
@@ -690,17 +707,17 @@ export default function GuideViewer({ params }: { params: Promise<{ jobId: strin
         processed += `\n</${tag}>`;
       }
       
-      // Fix broken JSON formatting inside tags
-      const tagRegex = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, 'i');
-      const match = processed.match(tagRegex);
-      if (match) {
-        let jsonContent = match[1].trim();
-        jsonContent = jsonContent.replace(/,\\s*([\\]}])/g, '$1'); // Remove trailing commas
+      // Fix broken JSON formatting and internal code fences inside tags
+      const tagRegex = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, 'gi');
+      processed = processed.replace(tagRegex, (_fullMatch, rawInner) => {
+        let jsonContent = rawInner.trim();
+        jsonContent = jsonContent.replace(/```[\w-]*\n?/g, '').replace(/```/g, '').replace(/`/g, '').trim();
+        jsonContent = jsonContent.replace(/,\s*([\]}])/g, '$1'); // Remove trailing commas
         if (tag === 'quiz' && !jsonContent.startsWith("[") && jsonContent.includes("{")) {
           jsonContent = `[${jsonContent}]`;
         }
-        processed = processed.replace(tagRegex, `<${tag}>\n${jsonContent}\n</${tag}>`);
-      }
+        return `<${tag}>\n${jsonContent}\n</${tag}>`;
+      });
       
       // Wrap properly closed tags in div
       const wrapRegex = new RegExp(`<${tag}([^>]*?)>([\\s\\S]*?)<\\/${tag}>`, 'gi');
