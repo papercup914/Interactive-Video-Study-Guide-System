@@ -83,6 +83,30 @@ async def check_existing_guide(url: str):
             
     return {"exists": False}
 
+def normalize_length_preset(val: Optional[str]) -> str:
+    if not val:
+        return "적당한 설명"
+    v = val.strip().lower()
+    if v in ["핵심 요약", "basic", "short", "summary", "quick"]:
+        return "핵심 요약"
+    if v in ["적당한 설명", "standard", "medium", "normal"]:
+        return "적당한 설명"
+    if v in ["아주 상세하게", "deep", "detailed", "long"]:
+        return "아주 상세하게"
+    return "적당한 설명"
+
+def normalize_analogy_preset(val: Optional[str]) -> str:
+    if not val:
+        return "적절한 비유 추가"
+    v = val.strip().lower()
+    if v in ["비유 없이 담백하게", "academic", "none", "plain"]:
+        return "비유 없이 담백하게"
+    if v in ["적절한 비유 추가", "standard", "moderate", "curriculum"]:
+        return "적절한 비유 추가"
+    if v in ["풍부한 비유", "story", "rich", "feynman"]:
+        return "풍부한 비유"
+    return "적절한 비유 추가"
+
 @router.get("/presets")
 async def get_video_presets(job_id: Optional[str] = None, url: Optional[str] = None):
     """
@@ -126,14 +150,22 @@ async def get_video_presets(job_id: Optional[str] = None, url: Optional[str] = N
                 
         presets_map = {}
         for g in sibling_guides:
-            length = g.get("length_preset") or "기본"
-            analogy = g.get("analogy_preset") or "기본"
+            raw_length = g.get("length_preset")
+            raw_analogy = g.get("analogy_preset")
+            length = normalize_length_preset(raw_length)
+            analogy = normalize_analogy_preset(raw_analogy)
             key = f"{length}__{analogy}"
+            
             doc = g.get("document", {})
             chapter_count = len(doc) if isinstance(doc, dict) else 0
+            
+            g_title = g.get("title", "")
+            if not g_title or g_title.strip() == "- YouTube":
+                g_title = target_title if target_title and target_title.strip() != "- YouTube" else "YouTube 학습 가이드"
+                
             presets_map[key] = {
                 "id": g.get("id"),
-                "title": g.get("title", "제목 없음"),
+                "title": g_title,
                 "url": g.get("url", ""),
                 "date": g.get("date", ""),
                 "length_preset": length,
@@ -144,9 +176,13 @@ async def get_video_presets(job_id: Optional[str] = None, url: Optional[str] = N
                 "video_duration": g.get("video_duration", "")
             }
             
+        final_title = target_title or (current_guide.get("title") if current_guide else "")
+        if not final_title or final_title.strip() == "- YouTube":
+            final_title = "YouTube 학습 가이드"
+            
         return {
             "url": target_url,
-            "title": target_title or (current_guide.get("title") if current_guide else ""),
+            "title": final_title,
             "current_job_id": job_id,
             "total_presets": len(presets_map),
             "presets": presets_map

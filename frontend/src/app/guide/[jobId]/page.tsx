@@ -58,6 +58,22 @@ export type PresetInfo = {
   video_duration?: string;
 };
 
+function normalizeLength(val?: string): "핵심 요약" | "적당한 설명" | "아주 상세하게" {
+  if (!val) return "적당한 설명";
+  const v = val.trim().toLowerCase();
+  if (v.includes("핵심") || v.includes("basic") || v.includes("short") || v.includes("summary") || v.includes("quick")) return "핵심 요약";
+  if (v.includes("상세") || v.includes("deep") || v.includes("detailed") || v.includes("long")) return "아주 상세하게";
+  return "적당한 설명";
+}
+
+function normalizeAnalogy(val?: string): "비유 없이 담백하게" | "적절한 비유 추가" | "풍부한 비유" {
+  if (!val) return "적절한 비유 추가";
+  const v = val.trim().toLowerCase();
+  if (v.includes("담백") || v.includes("academic") || v.includes("none") || v.includes("plain")) return "비유 없이 담백하게";
+  if (v.includes("풍부") || v.includes("story") || v.includes("rich") || v.includes("feynman")) return "풍부한 비유";
+  return "적절한 비유 추가";
+}
+
 /**
  * 가이드 상세 뷰어 전용 9종 프리셋 매트릭스 탐색 모달
  */
@@ -66,6 +82,8 @@ function ViewerPresetMatrixModal({
   currentJobId,
   presets,
   totalPresets,
+  currentLengthPreset,
+  currentAnalogyPreset,
   onClose,
   onSelectGuide,
   onCreatePreset
@@ -74,10 +92,49 @@ function ViewerPresetMatrixModal({
   currentJobId: string;
   presets: Record<string, PresetInfo>;
   totalPresets: number;
+  currentLengthPreset: string;
+  currentAnalogyPreset: string;
   onClose: () => void;
   onSelectGuide: (jobId: string) => void;
   onCreatePreset: (length: string, analogy: string) => void;
 }) {
+  // 1. 모든 presets 항목들을 3x3 키로 정규화하여 맵 구축
+  const normalizedMap: Record<string, PresetInfo> = {};
+  if (presets && typeof presets === "object") {
+    Object.values(presets).forEach((item) => {
+      if (!item) return;
+      const l = normalizeLength(item.length_preset);
+      const a = normalizeAnalogy(item.analogy_preset);
+      normalizedMap[`${l}__${a}`] = {
+        ...item,
+        length_preset: l,
+        analogy_preset: a
+      };
+    });
+  }
+
+  // 2. 현재 열람 중인 jobId가 매트릭스에 없더라도, 현재 선택된 length/analogy 위치에 현재 가이드 주입!
+  const curL = normalizeLength(currentLengthPreset);
+  const curA = normalizeAnalogy(currentAnalogyPreset);
+  const currentKey = `${curL}__${curA}`;
+  if (!normalizedMap[currentKey]) {
+    normalizedMap[currentKey] = {
+      id: currentJobId,
+      title: title,
+      url: "",
+      date: new Date().toISOString(),
+      length_preset: curL,
+      analogy_preset: curA,
+      chapter_count: 0,
+      provider: "youtube"
+    };
+  }
+
+  const effectiveTotal = Math.max(totalPresets || 0, Object.keys(normalizedMap).length, 1);
+
+  // 3. 타이틀 클린업
+  const displayTitle = (title || "").replace(/^-\s*YouTube$/i, 'YouTube 학습 가이드').replace(/-\s*YouTube$/i, '').trim() || "YouTube 학습 가이드";
+
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4 animate-in fade-in" onClick={onClose}>
       <div className="bg-surface w-full max-w-2xl rounded-2xl p-6 shadow-2xl border border-border-subtle animate-in zoom-in-95" onClick={(e) => e.stopPropagation()}>
@@ -88,9 +145,9 @@ function ViewerPresetMatrixModal({
               <span className="bg-primary/10 text-primary text-xs font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
                 <Sparkles size={12} /> 9종 프리셋 탐색기
               </span>
-              <span className="text-xs text-muted-foreground">총 {totalPresets}개 프리셋 보유</span>
+              <span className="text-xs text-muted-foreground">총 {effectiveTotal}개 프리셋 보유</span>
             </div>
-            <h3 className="font-bold text-base text-text-primary line-clamp-1">{title.replace(/\.pdf$/i, '')}</h3>
+            <h3 className="font-bold text-base text-text-primary line-clamp-1">{displayTitle}</h3>
           </div>
           <button onClick={onClose} className="text-muted-foreground hover:text-text-primary p-1.5 rounded-lg hover:bg-surface-variant transition-colors">
             <X size={20} />
@@ -111,17 +168,17 @@ function ViewerPresetMatrixModal({
               <div className="flex flex-col gap-2">
                 {ANALOGY_PRESETS.map((analogy) => {
                   const key = `${length}__${analogy}`;
-                  const item = presets[key];
+                  const item = normalizedMap[key];
                   const isAvailable = Boolean(item);
-                  const isCurrent = item?.id === currentJobId;
+                  const isCurrent = item?.id === currentJobId || (!item && key === currentKey);
 
                   return (
                     <button
                       key={analogy}
                       onClick={() => {
-                        if (isAvailable && item) {
+                        if (isAvailable && item && item.id !== currentJobId) {
                           onSelectGuide(item.id);
-                        } else {
+                        } else if (!isAvailable) {
                           onCreatePreset(length, analogy);
                         }
                       }}
@@ -149,8 +206,8 @@ function ViewerPresetMatrixModal({
                       </div>
                       <div className="flex items-center justify-between mt-1 text-[10px]">
                         {isCurrent ? (
-                          <span className="text-primary font-bold">{item.chapter_count}개 챕터</span>
-                        ) : isAvailable ? (
+                          <span className="text-primary font-bold">{item?.chapter_count ? `${item.chapter_count}개 챕터` : '열람 중'}</span>
+                        ) : isAvailable && item ? (
                           <>
                             <span className="text-muted-foreground">{item.chapter_count}개 챕터</span>
                             <span className="text-primary font-bold flex items-center">
@@ -1473,6 +1530,8 @@ export default function GuideViewer({ params }: { params: Promise<{ jobId: strin
           currentJobId={jobId}
           presets={siblingPresets}
           totalPresets={totalSiblingPresets}
+          currentLengthPreset={lengthPreset}
+          currentAnalogyPreset={analogyPreset}
           onClose={() => setShowPresetMatrix(false)}
           onSelectGuide={handleSelectPresetGuide}
           onCreatePreset={handleCreatePresetFromModal}
