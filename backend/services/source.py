@@ -44,6 +44,10 @@ def extract_text_from_web(url: str):
         if data.get("code") == 200 and data.get("data"):
             content = data["data"].get("content", "")
             title = data["data"].get("title", target_url)
+            if title:
+                title = title.replace(" - YouTube", "").replace("- YouTube", "").replace("YouTube", "").strip()
+            if not title:
+                title = "학습 가이드"
             if content and len(content.strip()) >= 200:
                 return content.strip(), title
             else:
