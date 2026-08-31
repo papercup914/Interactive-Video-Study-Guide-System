@@ -78,6 +78,7 @@
 ## 3. Notion 문서 관리 현황
 
 1. **[공식 이슈 보드] [📋 Interactive Video Study Guide System 이슈 리포트 (통합 대시보드)](https://app.notion.com/p/3cba8db03fbe80a7972be85c1b2c2202)**:
+   - 📄 [[Bug Report] 랜딩 페이지에서 가이드 클릭 시 React Error #310 발생으로 인한 페이지 로딩 실패 이슈](https://app.notion.com/p/Bug-Report-React-Error-310-In-Progress-3cda8db03fbe8170af67f0ee00c46a4e) (`In Progress` - 사용자 검증 대기)
    - 📄 [[Bug Report] 대시보드와 가이드 상세 뷰어 간 9종 프리셋 표시 및 제목 불일치 이슈](https://app.notion.com/p/Bug-Report-9-Resolved-3cca8db03fbe816ab4e0d79a54a30a34) (`Resolved` - 사용자 검증 완료)
    - 📄 [[Bug Report] 프리셋 탐색 모달 오픈 시 브라우저 GPU 과부하로 인한 타 탭 비디오 버벅임 이슈](https://app.notion.com/p/Bug-Report-GPU-Resolved-3cca8db03fbe8105ad81dfeb3323d5e5) (`Resolved` - 사용자 검증 완료)
    - 📄 [[Bug Report] 2시간 이상 장문 유튜브 영상 가이드 생성 이슈](https://app.notion.com/p/Bug-Report-2-Resolved-3cca8db03fbe81059afada2b6b96d034) (`Resolved`)

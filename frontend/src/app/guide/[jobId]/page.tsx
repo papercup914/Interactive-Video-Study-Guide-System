@@ -546,6 +546,32 @@ export default function GuideViewer({ params }: { params: Promise<{ jobId: strin
 
   const articleRef = useRef<HTMLElement>(null);
 
+  // 영상 핵심 내용 함축 요약 및 주제 안내 계산 (React Hook 규칙에 따라 early return 이전에 선언)
+  const summaryInsight = useMemo(() => {
+    if (!document) return null;
+    const secKeys = Object.keys(document);
+    if (secKeys.length === 0) return null;
+
+    const firstSecContent = document[secKeys[0]] || "";
+    const cleanText = firstSecContent
+      .replace(/<[^>]*>[\s\S]*?<\/[^>]*>/g, '')
+      .replace(/<[^>]*>/g, '')
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/^#+\s+.*$/gm, '')
+      .replace(/>\s*/g, '')
+      .replace(/[*_`]/g, '')
+      .trim();
+
+    const paragraphs = cleanText.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
+    const leadText = paragraphs[0] ? paragraphs[0].slice(0, 180) + (paragraphs[0].length > 180 ? '...' : '') : "";
+
+    return {
+      totalSections: secKeys.length,
+      leadText: leadText,
+      topics: secKeys.slice(0, 5)
+    };
+  }, [document]);
+
 function extractVideoKey(url: string, title: string): string {
   if (!url) return title || "unknown";
   const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([^&?]+)/);
@@ -991,32 +1017,6 @@ function extractVideoKey(url: string, title: string): string {
   }
 
   const sections = Object.keys(document);
-
-  // 영상 핵심 내용 함축 요약 및 주제 안내 계산
-  const summaryInsight = useMemo(() => {
-    if (!document) return null;
-    const secKeys = Object.keys(document);
-    if (secKeys.length === 0) return null;
-
-    const firstSecContent = document[secKeys[0]] || "";
-    const cleanText = firstSecContent
-      .replace(/<[^>]*>[\s\S]*?<\/[^>]*>/g, '')
-      .replace(/<[^>]*>/g, '')
-      .replace(/```[\s\S]*?```/g, '')
-      .replace(/^#+\s+.*$/gm, '')
-      .replace(/>\s*/g, '')
-      .replace(/[*_`]/g, '')
-      .trim();
-
-    const paragraphs = cleanText.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
-    const leadText = paragraphs[0] ? paragraphs[0].slice(0, 180) + (paragraphs[0].length > 180 ? '...' : '') : "";
-
-    return {
-      totalSections: secKeys.length,
-      leadText: leadText,
-      topics: secKeys.slice(0, 5)
-    };
-  }, [document]);
 
   // Helper to inject <mark> tags into Markdown
   const getProcessedMarkdown = (sectionName: string, text: string) => {
