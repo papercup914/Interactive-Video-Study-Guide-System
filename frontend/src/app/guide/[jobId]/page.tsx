@@ -6,7 +6,7 @@ import {
   ArrowLeft, Loader2, List, FileText, Sparkles, X, Save, 
   MessageSquare, Trash2, AlertTriangle, Link as LinkIcon, 
   PlayCircle, Play, Pause, FastForward, Rewind, PanelLeftClose, 
-  PanelLeftOpen, CheckCircle2, ChevronRight, Grid 
+  PanelLeftOpen, CheckCircle2, ChevronRight, Grid, BookOpen 
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -276,7 +276,7 @@ const SidebarNav = ({ sections, router, isFloating = false }: { sections: string
 );
 
 const ChapterItem = ({ 
-  section, idx, content, notes, setSelectedNote, setSelectedCluster, getProcessedMarkdown, jobId, openRSVP
+  section, idx, content, notes, setSelectedNote, setSelectedCluster, getProcessedMarkdown, jobId, openRSVP, isInteractiveMode = true
 }: { 
   section: string; idx: number; content: string; notes: Note[]; 
   setSelectedNote: (n: Note) => void;
@@ -284,6 +284,7 @@ const ChapterItem = ({
   getProcessedMarkdown: (s: string, c: string) => string;
   jobId: string;
   openRSVP: (s: string) => void;
+  isInteractiveMode?: boolean;
 }) => {
   const [clusters, setClusters] = useState<{ id: string, top: number, notes: Note[] }[]>([]);
   const chapterRef = useRef<HTMLElement>(null);
@@ -364,36 +365,36 @@ const ChapterItem = ({
                 ),
                 th: (props: any) => <th className="border-b-2 border-border/60 p-2 font-bold bg-surface-container-low break-keep" {...props} />,
                 td: (props: any) => <td className="border-b border-border/40 p-2 break-words" {...props} />,
-                quiz: (props: any) => (
+                quiz: (props: any) => isInteractiveMode ? (
                   <ErrorBoundary chapterTitle={`${section} - 퀴즈`}>
                     <MDXQuiz {...props} />
                   </ErrorBoundary>
-                ),
-                feynman: (props: any) => (
+                ) : null,
+                feynman: (props: any) => isInteractiveMode ? (
                   <ErrorBoundary chapterTitle={`${section} - 파인만 모드`}>
                     <MDXFeynman {...props} />
                   </ErrorBoundary>
-                ),
-                steptracer: (props: any) => (
+                ) : null,
+                steptracer: (props: any) => isInteractiveMode ? (
                   <ErrorBoundary chapterTitle={`${section} - 논리 트레이서`}>
                     <MDXStepTracer {...props} />
                   </ErrorBoundary>
-                ),
-                mnemonic: (props: any) => (
+                ) : null,
+                mnemonic: (props: any) => isInteractiveMode ? (
                   <ErrorBoundary chapterTitle={`${section} - 연상기억법`}>
                     <MDXMnemonic {...props} />
                   </ErrorBoundary>
-                ),
-                procedure: (props: any) => (
+                ) : null,
+                procedure: (props: any) => isInteractiveMode ? (
                   <ErrorBoundary chapterTitle={`${section} - 절차 마스터`}>
                     <MDXProcedure {...props} />
                   </ErrorBoundary>
-                ),
+                ) : null,
                 highlight: (props: any) => <Highlight {...props} />,
                 scribble: (props: any) => <Scribble {...props} />,
                 "margin-note": (props: any) => <MarginNote text={props.text} {...props} />,
                 discussion: (props: any) => <MDXDiscussion {...props} sectionName={section} sectionContent={content} jobId={jobId} />
-              }), [section, content, jobId]) as any}
+              }), [section, content, jobId, isInteractiveMode]) as any}
             >
               {getProcessedMarkdown(section, content)}
             </ReactMarkdown>
@@ -478,6 +479,30 @@ export default function GuideViewer({ params }: { params: Promise<{ jobId: strin
   const [siblingPresets, setSiblingPresets] = useState<Record<string, PresetInfo>>({});
   const [totalSiblingPresets, setTotalSiblingPresets] = useState<number>(1);
   const [showPresetMatrix, setShowPresetMatrix] = useState<boolean>(false);
+  
+  // 파인만 / 인터랙티브 학습 모드 On/Off 상태 (몰입 읽기 모드)
+  const [isInteractiveMode, setIsInteractiveMode] = useState<boolean>(true);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("interactive_mode_enabled");
+      if (saved !== null) {
+        setIsInteractiveMode(saved === "true");
+      }
+    } catch (e) {
+      console.warn("Failed to read interactive mode from localStorage", e);
+    }
+  }, []);
+
+  const toggleInteractiveMode = () => {
+    setIsInteractiveMode((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("interactive_mode_enabled", String(next));
+      } catch (e) {}
+      return next;
+    });
+  };
   
   const resolvedParams = use(params);
   const jobId = resolvedParams.jobId;
@@ -1215,6 +1240,21 @@ function extractVideoKey(url: string, title: string): string {
                     </span>
                   </button>
 
+                  {/* 인터랙티브 학습 모드 On/Off 토글 버튼 */}
+                  <button 
+                    type="button"
+                    onClick={toggleInteractiveMode}
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl font-bold text-xs transition-colors border cursor-pointer shadow-xs ${
+                      isInteractiveMode 
+                        ? "bg-primary/10 hover:bg-primary/20 text-primary border-primary/20" 
+                        : "bg-surface-variant text-muted-foreground border-border-subtle hover:text-text-primary"
+                    }`}
+                    title={isInteractiveMode ? "파인만/퀴즈 등 인터랙티브 위젯을 숨기고 본문 읽기에 집중합니다." : "파인만/퀴즈 등 인터랙티브 학습 위젯을 다시 표시합니다."}
+                  >
+                    {isInteractiveMode ? <Sparkles size={14} className="text-primary" /> : <BookOpen size={14} />}
+                    <span>{isInteractiveMode ? "💡 인터랙티브 ON" : "📖 몰입 읽기 ON"}</span>
+                  </button>
+
                   {/* 다른 생성된 프리셋이 선택되었을 때의 바로 이동 버튼 */}
                   {isOtherExisting && (
                     <button 
@@ -1252,7 +1292,7 @@ function extractVideoKey(url: string, title: string): string {
         {/* Right Pane: Scrollable Content (Tabs) */}
         <div className={`${isLeftPanelOpen ? 'w-full lg:w-[60%]' : 'w-full max-w-5xl mx-auto border-l border-r border-border-subtle'} flex-shrink-0 flex flex-col bg-page-bg min-w-0 transition-all duration-300 ease-in-out`}>
           {/* Tabs Header */}
-          <div className="flex border-b border-border-subtle bg-surface px-6 pt-4 sticky top-0 z-10">
+          <div className="flex items-center border-b border-border-subtle bg-surface px-6 pt-4 sticky top-0 z-10">
             <button 
               onClick={() => setActiveTab("guide")}
               className={`pb-3 px-4 font-label-md text-label-md ${activeTab === "guide" ? "text-text-primary border-b-2 border-primary-container" : "text-muted-foreground border-b-2 border-transparent hover:text-text-primary transition-colors"}`}
@@ -1265,6 +1305,23 @@ function extractVideoKey(url: string, title: string): string {
             >
               내 노트 <span className="bg-primary-container/10 text-primary-container text-xs py-0.5 px-2 rounded-full">{notes.length}</span>
             </button>
+
+            {/* 몰입 읽기 / 인터랙티브 모드 스위치 */}
+            <div className="ml-auto pb-2 flex items-center">
+              <button 
+                type="button"
+                onClick={toggleInteractiveMode}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold text-xs transition-all border cursor-pointer ${
+                  isInteractiveMode 
+                    ? "bg-primary/10 text-primary border-primary/20 hover:bg-primary/20" 
+                    : "bg-surface-variant text-muted-foreground border-border-subtle hover:text-text-primary"
+                }`}
+                title={isInteractiveMode ? "파인만/퀴즈 등 인터랙티브 위젯을 숨기고 본문 읽기에 집중합니다." : "파인만/퀴즈 등 인터랙티브 학습 위젯을 다시 표시합니다."}
+              >
+                {isInteractiveMode ? <Sparkles size={13} className="text-primary" /> : <BookOpen size={13} />}
+                <span>{isInteractiveMode ? "인터랙티브 모드" : "몰입 읽기 모드"}</span>
+              </button>
+            </div>
           </div>
           
           {/* Tab Contents Container */}
@@ -1294,6 +1351,7 @@ function extractVideoKey(url: string, title: string): string {
                         getProcessedMarkdown={getProcessedMarkdown}
                         jobId={jobId}
                         openRSVP={handleOpenRSVP}
+                        isInteractiveMode={isInteractiveMode}
                       />
                     </div>
                   </div>

@@ -60,9 +60,14 @@
   1. [`frontend/src/app/guide/[jobId]/page.tsx`](file:///i:/Interactive%20Video%20Study%20Guide%20System/frontend/src/app/guide/%5BjobId%5D/page.tsx):
      - `fetchSiblingPresets`에 **2단계 강력한 Fallback 메커니즘** 탑재 (1차: `/api/guide/presets`, 실패 시 2차: `/api/guide/history`에서 `extractVideoKey` 기반으로 완벽 자동 조립).
      - `ViewerPresetMatrixModal` 타이틀 정제 로직 강화 (기본 텍스트인 경우 형제 가이드의 실제 유효한 비디오 제목을 우선 탐색 및 적용).
-  2. [`backend/routers/guide.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/routers/guide.py):
-     - `extract_key_for_group` 헬퍼 함수를 추가하여 대시보드의 비디오 키 매칭 알고리즘과 100% 동일하게 일치화.
-  3. **검증**: `npm run build` (Turbopack) 100% 성공 (에러 0건).
+### 7) [기능 구현] 파인만 및 인터랙티브 학습 모드 On/Off (몰입 읽기 모드) 탑재 (Completed)
+- **배경 및 목적**: 퀴즈 및 파인만 롤플레잉 위젯에 대한 학습자의 인지적 부담과 피로도를 해소하고, 서술형 텍스트 본문 읽기에만 100% 집중할 수 있는 환경 제공.
+- **구현 내역**:
+  1. [`frontend/src/app/guide/[jobId]/page.tsx`](file:///i:/Interactive%20Video%20Study%20Guide%20System/frontend/src/app/guide/%5BjobId%5D/page.tsx):
+     - `isInteractiveMode` 상태 관리 및 브라우저 `localStorage`(`interactive_mode_enabled`) 연동으로 사용자 설정 영구 유지.
+     - 좌측 옵션 툴바 및 우측 탭 헤더에 직관적인 모드 전환 스위치(`💡 인터랙티브 모드` <-> `📖 몰입 읽기 모드`) 탑재.
+     - 모드 OFF 시 `<feynman>`, `<quiz>`, `<steptracer>`, `<mnemonic>`, `<procedure>` 컴포넌트를 `null` 처리하여 순수 본문 텍스트만 깔끔하게 렌더링.
+  2. **검증**: `npm run build` (Turbopack) 100% 성공 (에러 0건).
 
 ---
 
