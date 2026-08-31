@@ -992,6 +992,32 @@ function extractVideoKey(url: string, title: string): string {
 
   const sections = Object.keys(document);
 
+  // 영상 핵심 내용 함축 요약 및 주제 안내 계산
+  const summaryInsight = useMemo(() => {
+    if (!document) return null;
+    const secKeys = Object.keys(document);
+    if (secKeys.length === 0) return null;
+
+    const firstSecContent = document[secKeys[0]] || "";
+    const cleanText = firstSecContent
+      .replace(/<[^>]*>[\s\S]*?<\/[^>]*>/g, '')
+      .replace(/<[^>]*>/g, '')
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/^#+\s+.*$/gm, '')
+      .replace(/>\s*/g, '')
+      .replace(/[*_`]/g, '')
+      .trim();
+
+    const paragraphs = cleanText.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
+    const leadText = paragraphs[0] ? paragraphs[0].slice(0, 180) + (paragraphs[0].length > 180 ? '...' : '') : "";
+
+    return {
+      totalSections: secKeys.length,
+      leadText: leadText,
+      topics: secKeys.slice(0, 5)
+    };
+  }, [document]);
+
   // Helper to inject <mark> tags into Markdown
   const getProcessedMarkdown = (sectionName: string, text: string) => {
     if (!text) return "";
@@ -1282,9 +1308,57 @@ function extractVideoKey(url: string, title: string): string {
               );
             })()}
             
-            <div className="bg-surface-container-low p-4 rounded-lg border border-border-subtle mb-6 lg:mb-0">
-              <h3 className="font-label-md text-label-md text-text-primary mb-2">Guide Overview</h3>
-              <p className="font-body-sm text-body-sm text-muted-foreground">이 가이드는 사용자가 선택한 영상/문서에서 추출된 학습 자료입니다. 오른쪽 탭에서 상세 내용을 확인하고 드래그하여 노트를 추가해보세요.</p>
+            {/* 주제 함축 소개 & 핵심 학습 개요 카드 */}
+            <div className="bg-surface-container border border-border-subtle rounded-2xl p-5 mb-6 shadow-sm">
+              <div className="flex items-center justify-between gap-2 mb-3 pb-2.5 border-b border-border-subtle/60">
+                <div className="flex items-center gap-2">
+                  <span className="p-1.5 rounded-lg bg-primary/10 text-primary font-bold">
+                    <BookOpen size={16} />
+                  </span>
+                  <h3 className="font-bold text-sm text-text-primary">
+                    핵심 주제 및 학습 개요
+                  </h3>
+                </div>
+                {sections.length > 0 && (
+                  <span className="text-[11px] font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-full">
+                    총 {sections.length}개 챕터
+                  </span>
+                )}
+              </div>
+
+              {summaryInsight?.leadText ? (
+                <p className="text-xs md:text-sm text-text-secondary leading-relaxed mb-4 break-keep font-medium">
+                  {summaryInsight.leadText}
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground leading-relaxed mb-4 font-medium">
+                  {profileMessage || "본 영상의 핵심 원리와 실무 활용법을 체계적으로 분석한 맞춤형 학습 가이드입니다."}
+                </p>
+              )}
+
+              {/* 챕터 핵심 커리큘럼 로드맵 */}
+              {sections.length > 0 && (
+                <div className="flex flex-col gap-1.5 pt-2.5 border-t border-border-subtle/40">
+                  <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">주요 학습 커리큘럼</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {sections.slice(0, 5).map((sec, idx) => (
+                      <a
+                        key={idx}
+                        href={`#chapter-${idx}`}
+                        className="text-[11px] bg-surface hover:bg-surface-variant text-text-primary px-2.5 py-1 rounded-lg border border-border-subtle transition-colors truncate max-w-[200px]"
+                        title={sec}
+                      >
+                        {idx + 1}. {sec}
+                      </a>
+                    ))}
+                    {sections.length > 5 && (
+                      <span className="text-[11px] text-muted-foreground px-1.5 py-1 font-semibold">
+                        +{sections.length - 5}개 더보기
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
