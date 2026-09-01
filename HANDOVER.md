@@ -60,6 +60,15 @@
   1. [`frontend/src/app/guide/[jobId]/page.tsx`](file:///i:/Interactive%20Video%20Study%20Guide%20System/frontend/src/app/guide/%5BjobId%5D/page.tsx):
      - `fetchSiblingPresets`에 **2단계 강력한 Fallback 메커니즘** 탑재 (1차: `/api/guide/presets`, 실패 시 2차: `/api/guide/history`에서 `extractVideoKey` 기반으로 완벽 자동 조립).
      - `ViewerPresetMatrixModal` 타이틀 정제 로직 강화 (기본 텍스트인 경우 형제 가이드의 실제 유효한 비디오 제목을 우선 탐색 및 적용).
+### 7) [기능 구현] 파인만 및 인터랙티브 학습 모드 On/Off (몰입 읽기 모드) 탑재 (Completed)
+- **배경 및 목적**: 퀴즈 및 파인만 롤플레잉 위젯에 대한 학습자의 인지적 부담과 피로도를 해소하고, 서술형 텍스트 본문 읽기에만 100% 집중할 수 있는 환경 제공.
+- **구현 내역**:
+  1. [`frontend/src/app/guide/[jobId]/page.tsx`](file:///i:/Interactive%20Video%20Study%20Guide%20System/frontend/src/app/guide/%5BjobId%5D/page.tsx):
+     - `isInteractiveMode` 상태 관리 및 브라우저 `localStorage`(`interactive_mode_enabled`) 연동으로 사용자 설정 영구 유지.
+     - 좌측 옵션 툴바 및 우측 탭 헤더에 직관적인 모드 전환 스위치(`💡 인터랙티브 모드` <-> `📖 몰입 읽기 모드`) 탑재.
+     - 모드 OFF 시 `<feynman>`, `<quiz>`, `<steptracer>`, `<mnemonic>`, `<procedure>` 컴포넌트를 `null` 처리하여 순수 본문 텍스트만 깔끔하게 렌더링.
+  2. **검증**: `npm run build` (Turbopack) 100% 성공 (에러 0건).
+
 ### 8) [UX/품질 개선] 챕터 도입부 인삿말 완전 금지(Strict Zero-Greeting Policy) 및 영상 핵심 주제 안내 카드 탑재 (Completed)
 - **배경 및 목적**:
   - LLM 챕터 생성 시 "안녕하세요, 여러분의 튜터입니다" 등 진부한 챗봇식 인삿말을 일절 배제하고, 핵심 질문(Why/What) 및 실무 배경 훅으로 즉시 시작하여 가독성과 전문성 극대화.
@@ -72,6 +81,14 @@
      - 형식적인 `Guide Overview` 제거.
      - `summaryInsight`를 통해 첫 챕터 핵심 도입 텍스트, 총 챕터 수, 상위 5개 주요 챕터 바로가기 뱃지를 포함한 **"핵심 주제 및 학습 개요"** 카드로 전면 개편.
   3. **검증**: `npm run build` (Turbopack) 100% 성공 (에러 0건).
+
+### 9) [버그 해결] 랜딩 페이지에서 가이드 클릭 시 React Error #310 발생으로 인한 페이지 로딩 실패 이슈 해결 (In Progress)
+- **배경 및 문제점**: 메인 대시보드에서 가이드 카드 클릭 시 `Minified React error #310` (Rules of Hooks 위반) 에러와 함께 `This page couldn't load` 화면 발생.
+- **원인 분석**: `summaryInsight` `useMemo` 훅이 `if (loading) return` 조기 리턴문 아래에 위치하여 렌더링 간 훅 호출 개수 불일치 발생.
+- **해결 조치**:
+  1. [`frontend/src/app/guide/[jobId]/page.tsx`](file:///i:/Interactive%20Video%20Study%20Guide%20System/frontend/src/app/guide/%5BjobId%5D/page.tsx): `summaryInsight` 훅 선언부를 컴포넌트 최상단 훅 선언부(조기 리턴문 이전)로 이동하여 React Hook 규칙을 100% 준수하도록 수정.
+  2. **검증**: `npm run build` (Turbopack) 100% 무결성 통과 (에러 0건).
+  3. **Notion 버그 리포트 등록**: `In Progress` 상태로 이슈 등록 완료.
 
 ---
 
@@ -121,9 +138,11 @@ docker compose restart fastapi
 
 ## 5. 다음 대화에서 이어서 진행할 수 있는 과제
 
-1. **9종 프리셋 탐색기 사용자 최종 테스트 확인 후 Notion 상태를 `Resolved`로 전환**:
-   - Notion 이슈 페이지(`3cca8db0-3fbe-81e8-a896-ec1fcb14d163`) 상태 업데이트.
-2. **추가 유튜브 재생목록 대량 사전 생성 및 AWS 동기화**:
-   - 관리자 대시보드(`/admin/batch`)에서 신규 추천 강의 재생목록(CS 전공 지식, 알고리즘, 최신 AI 기술 등)을 일괄 생성하여 AWS 운영 DB로 푸시.
+1. **React Error #310 수정 및 뷰어 로딩 사용자 최종 확인 후 Notion 상태를 `Resolved`로 전환**:
+   - Notion 이슈 페이지(`3cda8db0-3fbe-8170-af67-f0ee00c46a4e`) 상태를 사용자의 피드백 확인 후 `Resolved`로 변경.
+2. **신규 생성 가이드의 도입부 인삿말 완전 배제(Strict Zero-Greeting Policy) 및 주제 요약 카드 실제 생성 품질 모니터링**:
+   - 관리자 배치 생성(`/admin/batch`) 또는 단일 영상 생성을 통해 훅 기반 첫 문장 및 주제 카드가 완벽하게 렌더링되는지 확인.
+3. **추가 유튜브 재생목록 대량 사전 생성 및 AWS 동기화**:
+   - 관리자 대시보드(`/admin/batch`)에서 추천 강의 재생목록을 일괄 생성하여 AWS 운영 DB로 푸시.
 
 
