@@ -91,9 +91,11 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
                         raise audio_err
                 
             metadata = await loop.run_in_executor(None, get_video_metadata, canonical_url)
+            video_chapters = None
             if metadata and metadata.get("title") and metadata["title"] != "제목 알 수 없음":
                 raw_title = metadata["title"]
                 video_duration = metadata.get("duration", 0)
+                video_chapters = metadata.get("chapters")
             elif not raw_title:
                 raw_title = "유튜브 학습 가이드"
         else:
@@ -144,7 +146,9 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
                 print(f"Failed to upload transcript for Context Caching: {e}")
             
         update_job_status(job_id, "generating_outline", "목차 구조 설계 중...")
-        sections = await loop.run_in_executor(None, generate_outline, master_summary, provider, url_hash, length_preset, force_refresh)
+        # Get video chapters variable safely
+        video_chapters = locals().get("video_chapters")
+        sections = await loop.run_in_executor(None, generate_outline, master_summary, provider, url_hash, length_preset, force_refresh, video_chapters)
         
         document = {}
         total_sections = len(sections)

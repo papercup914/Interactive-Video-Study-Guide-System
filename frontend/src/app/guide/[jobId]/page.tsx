@@ -552,25 +552,29 @@ export default function GuideViewer({ params }: { params: Promise<{ jobId: strin
     const secKeys = Object.keys(document);
     if (secKeys.length === 0) return null;
 
-    const firstSecContent = document[secKeys[0]] || "";
-    const cleanText = firstSecContent
-      .replace(/<[^>]*>[\s\S]*?<\/[^>]*>/g, '')
-      .replace(/<[^>]*>/g, '')
-      .replace(/```[\s\S]*?```/g, '')
-      .replace(/^#+\s+.*$/gm, '')
-      .replace(/>\s*/g, '')
-      .replace(/[*_`]/g, '')
-      .trim();
+    let leadText = profileMessage;
 
-    const paragraphs = cleanText.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
-    const leadText = paragraphs[0] ? paragraphs[0].slice(0, 180) + (paragraphs[0].length > 180 ? '...' : '') : "";
+    if (!leadText) {
+      const firstSecContent = document[secKeys[0]] || "";
+      const cleanText = firstSecContent
+        .replace(/<[^>]*>[\s\S]*?<\/[^>]*>/g, '')
+        .replace(/<[^>]*>/g, '')
+        .replace(/```[\s\S]*?```/g, '')
+        .replace(/^#+\s+.*$/gm, '')
+        .replace(/>\s*/g, '')
+        .replace(/[*_`]/g, '')
+        .trim();
+
+      const paragraphs = cleanText.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
+      leadText = paragraphs[0] ? paragraphs[0].slice(0, 180) + (paragraphs[0].length > 180 ? '...' : '') : "";
+    }
 
     return {
       totalSections: secKeys.length,
       leadText: leadText,
       topics: secKeys.slice(0, 5)
     };
-  }, [document]);
+  }, [document, profileMessage]);
 
 function extractVideoKey(url: string, title: string): string {
   if (!url) return title || "unknown";
@@ -1022,12 +1026,38 @@ function extractVideoKey(url: string, title: string): string {
   const getProcessedMarkdown = (sectionName: string, text: string) => {
     if (!text) return "";
     let processed = text;
-    
-    // HTML5 parsers (rehype-raw) don't support self-closing custom tags like <quiz />
-    // Also, custom tags are treated as inline by react-markdown and wrapped in <p>.
-    // A <button> (inside our custom components) inside a <p> causes a React hydration mismatch!
-    // Wrapping them in a <div> prevents the <p> wrapper.
-    
+
+    // 0. 시스템 메타 텍스트 태그 및 서두 인사말 제거 (Strict Zero-Greeting 방어)
+    // 0-1. 파트 1/2 메타 텍스트 전역 제거
+    processed = processed.replace(/#{0,4}\s*\[?\s*파트\s*[12]\s*:[^\]\n]*\]?\s*\n*/gi, '');
+
+    // 0-2. 본문 서두 챕터 제목 중복 줄 제거
+    if (sectionName) {
+      const escaped = sectionName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      processed = processed.trim().replace(new RegExp(`^\\s*(?:#{1,4}\\s*)?(?:\\d+\\.\\s*)?${escaped}\\s*\\n+`, 'i'), '');
+    }
+
+    // 0-3. 서두 인사말 / 자기소개 / 이번 챕터 소개 정규식 패턴
+    const greetingRegex1 = /^\s*(?:\*\*)?(?:안녕하세요|반갑습니다|환영합니다)[\s\S]*?(?:입니다|멘토입니다|튜터입니다|가이드입니다|파트너입니다)[.!\n]+(?:\*\*)?\s*/i;
+    const greetingRegex2 = /^\s*(?:\*\*)?(?:이번\s*(?:챕터|시간|강의|가이드)에서는?|오늘(?:\s*우리가)?\s*(?:함께)?\s*(?:살펴볼|알아볼|파헤쳐\s*볼|배워볼))[\s\S]*?(?:알아보겠습니다|살펴보겠습니다|배워보겠습니다|시작하겠습니다|파헤쳐\s*보겠습니다|짚어보겠습니다|함께\s*가보시죠|하겠습니다|합니다|입니다)[.!\n]+(?:\*\*)?\s*/i;
+    const greetingRegex3 = /^\s*(?:\*\*)?(?:안녕하세요|반갑습니다|환영합니다)[^\n]*?(?:\*\*)?\n+/i;
+
+    // 첫 줄이 제목 형태인 경우 보존하며 두 번째 줄 이하의 인사말 블록 제거
+    const lines = processed.trim().split('\n');
+    if (lines.length > 1 && (lines[0].startsWith('#') || (lines[0].trim().length < 80 && !lines[0].trim().endsWith('.')))) {
+      const firstLine = lines[0];
+      let rest = lines.slice(1).join('\n').trim();
+      rest = rest.replace(greetingRegex1, '');
+      rest = rest.replace(greetingRegex2, '');
+      rest = rest.replace(greetingRegex3, '');
+      processed = `${firstLine}\n\n${rest}`;
+    }
+
+    // 최상단 직격 인사말 제거
+    processed = processed.trim().replace(greetingRegex1, '');
+    processed = processed.trim().replace(greetingRegex2, '');
+    processed = processed.trim().replace(greetingRegex3, '');
+
     // Fix CommonMark parsing bug with Korean particles attached to markdown markers.
     processed = processed.replace(/(\*\*|__|\*|_)(?=[가-힣])/g, '$1<!-- -->');
     

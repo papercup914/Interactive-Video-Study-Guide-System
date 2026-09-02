@@ -297,7 +297,7 @@ def process_audio(audio_path: str, provider: str, url_hash: Optional[str] = None
     return transcript
 
 
-def generate_outline(context_data: str, provider: str, url_hash: str, length_preset: str = "아주 상세하게", force_refresh: bool = False) -> List[str]:
+def generate_outline(context_data: str, provider: str, url_hash: str, length_preset: str = "아주 상세하게", force_refresh: bool = False, video_chapters: list = None) -> List[str]:
     """
     오디오 컨텍스트를 분석하여 상세 목차를 생성하고 로컬에 캐시합니다.
     """
@@ -341,12 +341,35 @@ def generate_outline(context_data: str, provider: str, url_hash: str, length_pre
             sections = ["전체 문서"]
         return sections
 
-    prompt = f"""
-    주어진 내용(오디오 또는 스크립트)을 분석하여 학습용 목차(Outline)를 작성해줘.
-    {outline_instruction}
-    - [중요] 원본 스크립트가 외국어(영어 등)이더라도, 각 목차 항목의 제목은 반드시 자연스럽고 명확한 한국어로 번역하여 작성하세요.
-    - 각 목차 항목은 번호나 기호 없이 새로운 줄에 순수 한국어 제목만 하나씩 작성해줘. (예: 대형 언어 모델의 생태계와 작동 원리)
-    """
+    is_valid_chapters = False
+    chapter_text = ""
+    if video_chapters and isinstance(video_chapters, list):
+        chapter_titles = [str(ch.get('title', '')).strip() for ch in video_chapters if ch.get('title')]
+        if chapter_titles:
+            is_valid_chapters = True
+            chapter_text = "\n".join(f"- {title}" for title in chapter_titles)
+
+    if is_valid_chapters:
+        prompt = f"""
+        유튜브 영상의 공식 챕터 정보가 주어집니다.
+        다음 공식 챕터 제목들을 학습용 목차에 맞게 자연스럽고 명확한 한국어로 번역 및 정제해주세요.
+        원래의 챕터 개수와 시간적 순서(Time Sequence)를 100% 엄격하게 동일하게 유지해야 합니다.
+        
+        - [중요] 각 목차 항목은 번호나 기호 없이 새로운 줄에 순수 한국어 제목만 하나씩 작성해줘.
+        
+        공식 챕터 제목:
+        {chapter_text}
+        """
+        # 챕터 번역에는 전체 스크립트를 제외하여 토큰을 절약합니다.
+        context_data = "이 영상의 스크립트 내용은 위의 챕터 제목을 번역하기 위한 컨텍스트입니다."
+    else:
+        prompt = f"""
+        주어진 내용(오디오 또는 스크립트)을 분석하여 학습용 목차(Outline)를 작성해줘.
+        {outline_instruction}
+        - [중요] 반드시 영상의 시간적 흐름(Time Sequence)을 엄격히 준수하여 순서대로 나열할 것. 사건의 전후 관계나 목차의 순서를 임의로 섞지 마세요.
+        - [중요] 원본 스크립트가 외국어(영어 등)이더라도, 각 목차 항목의 제목은 반드시 자연스럽고 명확한 한국어로 번역하여 작성하세요.
+        - 각 목차 항목은 번호나 기호 없이 새로운 줄에 순수 한국어 제목만 하나씩 작성해줘. (예: 대형 언어 모델의 생태계와 작동 원리)
+        """
     
     class OutlineSchema(BaseModel):
         sections: List[str] = Field(description="한국어로 작성된 목차 항목들의 리스트 (기호나 번호 없이 순수 한국어 제목만 포함)")
@@ -458,6 +481,41 @@ def _get_cache_dir() -> str:
     os.makedirs(cache_dir, exist_ok=True)
     return cache_dir
 
+def sanitize_chapter_narrative(content: str, section_title: str = "") -> str:
+    """
+    LLM 출력물에서 시스템 메타 텍스트(예: [파트 1: ...]) 및 서두 인사말(예: 안녕하세요, 반갑습니다 등)을
+    강력한 정규식으로 완벽히 제거하여 순수한 서술형 학습 본문으로 정제합니다.
+    """
+    if not content or not isinstance(content, str):
+        return ""
+
+    sanitized = content.strip()
+
+    # 1. 시스템 메타 텍스트 태그 전역 제거 (예: ### [파트 1: 상세 챕터 서술형 학습 본문], [파트 2: ...])
+    sanitized = re.sub(r'#{0,4}\s*\[?\s*파트\s*[12]\s*:[^\]\n]*\]?\s*\n*', '', sanitized, flags=re.IGNORECASE)
+
+    # 2. 본문 서두 챕터 제목 중복 줄 제거
+    if section_title:
+        escaped_title = re.escape(section_title.strip())
+        sanitized = re.sub(rf'^\s*(?:#{{1,4}}\s*)?(?:\d+\.\s*)?{escaped_title}\s*\n+', '', sanitized.strip(), flags=re.IGNORECASE)
+
+    # 3. 첫 줄이 제목인 경우 보존하면서 두 번째 줄 이하의 인사말 블록 제거
+    lines = sanitized.strip().split('\n')
+    if lines and (lines[0].startswith('#') or (len(lines[0].strip()) < 80 and not lines[0].strip().endswith('.'))):
+        first_line = lines[0]
+        rest = '\n'.join(lines[1:]).strip()
+        rest = re.sub(r'^\s*(?:\*\*)?(?:안녕하세요|반갑습니다|환영합니다)[\s\S]*?(?:입니다|멘토입니다|튜터입니다|가이드입니다|파트너입니다)[.!\n]+(?:\*\*)?\s*', '', rest, flags=re.IGNORECASE)
+        rest = re.sub(r'^\s*(?:\*\*)?(?:이번\s*(?:챕터|시간|강의|가이드)에서는?|오늘(?:\s*우리가)?\s*(?:함께)?\s*(?:살펴볼|알아볼|파헤쳐\s*볼|배워볼))[\s\S]*?(?:알아보겠습니다|살펴보겠습니다|배워보겠습니다|시작하겠습니다|파헤쳐\s*보겠습니다|짚어보겠습니다|함께\s*가보시죠|하겠습니다|합니다|입니다)[.!\n]+(?:\*\*)?\s*', '', rest, flags=re.IGNORECASE)
+        rest = re.sub(r'^\s*(?:\*\*)?(?:안녕하세요|반갑습니다|환영합니다)[^\n]*?(?:\*\*)?\n+', '', rest, flags=re.IGNORECASE)
+        sanitized = first_line + '\n\n' + rest
+
+    # 4. 제목 없이 바로 시작된 최상단 서두 인사말 / 자기소개 문구 제거
+    sanitized = re.sub(r'^\s*(?:\*\*)?(?:안녕하세요|반갑습니다|환영합니다)[\s\S]*?(?:입니다|멘토입니다|튜터입니다|가이드입니다|파트너입니다)[.!\n]+(?:\*\*)?\s*', '', sanitized.strip(), flags=re.IGNORECASE)
+    sanitized = re.sub(r'^\s*(?:\*\*)?(?:이번\s*(?:챕터|시간|강의|가이드)에서는?|오늘(?:\s*우리가)?\s*(?:함께)?\s*(?:살펴볼|알아볼|파헤쳐\s*볼|배워볼))[\s\S]*?(?:알아보겠습니다|살펴보겠습니다|배워보겠습니다|시작하겠습니다|파헤쳐\s*보겠습니다|짚어보겠습니다|함께\s*가보시죠|하겠습니다|합니다|입니다)[.!\n]+(?:\*\*)?\s*', '', sanitized.strip(), flags=re.IGNORECASE)
+    sanitized = re.sub(r'^\s*(?:\*\*)?(?:안녕하세요|반갑습니다|환영합니다)[^\n]*?(?:\*\*)?\n+', '', sanitized.strip(), flags=re.IGNORECASE)
+
+    return sanitized.strip()
+
 def validate_chapter_narrative(content: str, min_chars: int = 1000, min_narrative_chars: int = 800) -> tuple[bool, str]:
     """
     챕터 출력물이 [파트 1: 상세 서술형 학습 본문] + [파트 2: 인터랙티브 학습 장치]의
@@ -466,6 +524,7 @@ def validate_chapter_narrative(content: str, min_chars: int = 1000, min_narrativ
     - 원시 JSON / 코드 펜스 JSON 구조로 시작하는 경우 거부
     - 인터랙티브 태그 이전의 순수 서술형 본문이 min_narrative_chars 미만인 경우 거부
     - 1,000자 미만(또는 지정된 최소 길이)의 지나치게 짧은 요약 거부
+    - 인사말(안녕하세요, 반갑습니다) 또는 파트 메타 텍스트가 남아있는 경우 거부
     """
     if not content or not isinstance(content, str):
         return False, "내용이 비어 있거나 올바른 문자열이 아닙니다."
@@ -478,8 +537,15 @@ def validate_chapter_narrative(content: str, min_chars: int = 1000, min_narrativ
         
     if FORBIDDEN_START_PATTERN.match(trimmed):
         return False, "출력이 마크다운 서술형 본문 없이 인터랙티브 태그 또는 원시 데이터 블록으로 바로 시작합니다."
+
+    # 2. 파트 메타 텍스트 또는 서두 인사말 잔류 검사
+    first_150 = trimmed[:150]
+    if re.search(r'\[\s*파트\s*[12]\s*:', first_150, re.IGNORECASE):
+        return False, "출력에 시스템 메타 텍스트([파트 1/2...])가 포함되어 있습니다."
+    if re.search(r'(?:안녕하세요|반갑습니다|환영합니다|여러분의\s*튜터)', first_150):
+        return False, "출력 서두에 의례적인 인사말(안녕하세요/튜터 소개 등)이 포함되어 있습니다."
         
-    # 2. 인터랙티브 태그가 포함되어 있다면, 태그 이전의 서술형 본문 길이 선제 검증
+    # 3. 인터랙티브 태그가 포함되어 있다면, 태그 이전의 서술형 본문 길이 선제 검증
     tag_match = INTERACTIVE_TAG_PATTERN.search(trimmed)
     if tag_match:
         tag_start_pos = tag_match.start()
@@ -487,7 +553,7 @@ def validate_chapter_narrative(content: str, min_chars: int = 1000, min_narrativ
         if len(narrative_part) < min_narrative_chars:
             return False, f"인터랙티브 태그 이전의 서술형 본문 분량이 부족합니다 ({len(narrative_part)} < {min_narrative_chars}자)."
             
-    # 3. 전체 길이 검증
+    # 4. 전체 길이 검증
     if len(trimmed) < min_chars:
         return False, f"출력 전체 길이가 너무 짧습니다 ({len(trimmed)} < {min_chars}자)."
             
@@ -553,13 +619,14 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
                 if len(cached_content) >= 50:
                     return cached_content
             else:
+                sanitized_cache = sanitize_chapter_narrative(cached_content, section_title)
                 is_valid, reason = validate_chapter_narrative(
-                    cached_content, 
+                    sanitized_cache, 
                     min_chars=target_min_chars, 
                     min_narrative_chars=target_narrative_min
                 )
                 if is_valid:
-                    return cached_content
+                    return sanitized_cache
                 else:
                     print(f"[Cache Invalidation] Auto-invalidating cached chapter '{section_title}': {reason}")
                     try:
@@ -611,59 +678,50 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
             어조(Tone): {tutor_tone}
             집중 영역(Focus Areas): {tutor_focus}
             
-            지시사항: 당신은 단순한 AI가 아니라 위의 '역할(Role)'을 수행하는 전문가입니다. 본문 전체의 문체와 내용 전개를 이 '어조(Tone)'와 '집중 영역'에 완벽히 맞추십시오.
+            지시사항: 당신은 위 역할을 수행하는 전문가입니다. 본문 전체의 문체와 내용 전개를 이 '어조'와 '집중 영역'에 완벽히 맞추십시오. 
+            단, 어떤 페르소나이든 **인사말(예: 안녕하세요, 반갑습니다, 제 이름은~)은 절대 엄격히 금지**됩니다. 본론으로 바로 들어가십시오.
             """
         else:
-            tutor_directive = "당신은 영상 내용을 기반으로 학습 가이드를 작성하는 튜터입니다."
+            tutor_directive = "당신은 영상 내용을 기반으로 학습 가이드를 작성하는 튜터입니다. 단, 인사말은 절대 하지 마십시오."
 
         system_prompt = f"""
         {tutor_directive}
         
-        제공된 [전체 스크립트]를 문맥적으로 분석하여, 다음 챕터 제목(또는 주제)에 해당하는 내용을 찾아 상세한 챕터 학습 가이드 본문을 작성하십시오.
-        챕터 제목은 스크립트의 특정 부분을 요약한 것이므로, 정확히 같은 단어가 없더라도 의미상 관련된 내용을 찾아야 합니다.
-        단, 전체 스크립트를 아무리 살펴봐도 해당 주제와 관련된 내용이 아예 존재하지 않을 때만 예외적으로 "해당 내용을 영상에서 찾을 수 없습니다."라고 출력하십시오.
-        
-        챕터 제목: {section_title}
+        제공된 [전체 스크립트]를 분석하여 챕터 제목 '{section_title}'에 해당하는 내용으로 상세한 챕터 학습 가이드 본문을 작성하십시오.
         
         <PERSONA_DIRECTIVE>
-        당신은 무미건조한 AI가 아닙니다. 위에서 부여된 [AI 튜터 페르소나]와 아래의 [학습자 프로필]을 결합하여 완벽한 맞춤형 지도를 수행하십시오.
-        
         [학습자 프로필]
         {learner_profile if learner_profile else "일반적인 성인 학습자"}
-        
-        1. 어조 강제: 튜터 페르소나의 '어조'와 학습자 프로필의 '원하는 튜터 어조'를 조화롭게 섞어 본문 전체에 걸쳐 철저하게 유지하십시오.
-        2. 비유 강제: 어려운 개념을 설명할 때는 반드시 프로필에 명시된 '주요 관심사'와 관련된 메타포(비유)를 하나 이상 들어 설명하십시오. 
-        3. 눈높이 강제: '학습 목표'와 '연령대/직업'에 맞추어 전문 용어의 사용 수준과 설명의 깊이를 조절하십시오.
-        4. 언어 및 표현 현지화 강제: 원본 영상 및 스크립트가 외국어(영어, 일본어 등)이더라도, 모든 서술형 본문과 인터랙티브 위젯 내용은 100% 자연스럽고 유려한 한국어로 번역 및 해설하여 작성하십시오. '24/7', 'ASAP' 등 영어식 표현이나 약어는 원문을 그대로 쓰지 말고 문맥에 맞게 자연스러운 한국어(예: '일주일 24시간 내내', '연중무휴' 등)로 번역하여 사용하십시오.
+        1. 튜터 페르소나의 '어조'와 학습자 프로필의 '원하는 튜터 어조'를 조화롭게 섞어 본문 전체에 걸쳐 철저하게 유지하십시오.
+        2. 비유 강제: 어려운 개념을 설명할 때는 프로필의 '주요 관심사'와 관련된 메타포(비유)를 하나 이상 들어 설명하십시오. 
+        3. 눈높이 강제: '학습 목표'와 '연령대/직업'에 맞추어 전문 용어의 수준을 조절하십시오.
+        4. 번역 강제: 외국어 영상이더라도 100% 자연스러운 한국어로 번역 및 해설하십시오.
         </PERSONA_DIRECTIVE>
         
         ======================================================================
-        [🚨 절대 준수 1: 도입부 인삿말 완전 금지 (Strict Zero-Greeting Policy)]
-        "안녕하세요", "여러분의 튜터입니다", "이번 시간에는...", "반갑습니다" 등의 의례적인 인삿말, 챗봇식 자기소개, 맺음말을 일절 출력하지 마십시오.
+        [🚨 초강력 절대 준수 1: 인사말/자기소개 완전 영구 금지 (Strict Zero-Greeting Policy)]
+        "안녕하세요", "여러분의 튜터입니다", "이번 시간에는...", "반갑습니다" 등의 인사말이나 챗봇식 자기소개를 **일절 단 한 글자도 출력하지 마십시오.**
+        어떠한 페르소나가 주어지더라도 인사말은 허용되지 않습니다.
         본문 서두는 반드시 이 챕터에서 해결하고자 하는 핵심 질문(Why/What)이나 흥미로운 실무/기술적 배경 한 줄(Hook)로 즉시 시작하십시오!
-        - (금지 예시): "안녕하세요! 여러분의 AI 튜터입니다. 이번 챕터에서는 프롬프트 엔지니어링에 대해 알아보겠습니다."
-        - (권장 예시): "LLM이 동일한 프롬프트에도 엉뚱한 답변을 내놓는 근본적인 이유는 무엇일까요? 그 메커니즘과 해결 구조부터 짚어보겠습니다."
         ======================================================================
-        [🚨 절대 준수 2: 2단계 엄격 출력 구조 (2-Stage Strict Output Structure)]
-        당신의 출력은 반드시 아래 2단계 순서를 완벽히 지켜야 합니다.
-        파트 1(서술형 본문)을 생략하고 파트 2(태그)만 단독 출력하거나, 태그로 바로 시작하는 것은 엄격히 금지됩니다.
+        [🚨 초강력 절대 준수 2: 메타 텍스트 출력 금지]
+        출력 결과에 "[파트 1: 상세 챕터 서술형 학습 본문]", "---", "### [파트 2...]" 와 같은 안내용 구분선이나 구조 텍스트를 절대 출력하지 마십시오.
+        오직 마크다운 포맷(`## {section_title}`)의 실제 본문 내용부터 바로 시작해야 합니다.
         ======================================================================
+        [🚨 초강력 절대 준수 3: 2단계 엄격 출력 구조]
+        당신의 출력은 반드시 아래 2단계 순서를 완벽히 지켜야 하며, 메타 안내 텍스트 없이 내용만 출력하십시오.
 
-        ### [파트 1: 상세 챕터 서술형 학습 본문]
-        학습자가 이 주제를 완벽히 독학할 수 있도록, 마크다운 형식(# {section_title})으로 체계적이고 풍부하게 서술하십시오:
+        (본문 시작 부분)
+        ## {section_title}
         1. **도입 및 핵심 문제 제기 (훅 & 핵심 요약 중심)**: 
-           - 인사말 없이, 이 챕터에서 해결할 핵심 질문(Why/What)이나 흥미로운 실무 배경으로 즉시 시작하여 학습자의 호기심과 동기를 자극합니다.
+           - 인사말 없이 즉시 시작하여 학습자의 호기심 자극.
         2. **상세 원리 및 비유 설명**: 
            - {analogy_instruction}
-           - 단순히 나열하지 말고, 초보자도 한 번에 이해할 수 있도록 친절하고 구체적인 예시와 비유를 곁들여 풍부하게 설명하십시오.
-        3. **핵심 인사이트 박스**: `> **💡 핵심 인사이트**` 형태의 Markdown 인용구를 활용하여 꼭 기억해야 할 핵심을 요약합니다.
-        4. **실무 활용 팁 / 주의사항**: 실생활이나 개발/업무에서 활용할 때 알아두어야 할 꿀팁이나 피해야 할 실수를 안내합니다.
-        5. **분량 지침**: {length_instruction} (반드시 풍부하고 깊이 있는 서술형 문장들로 본문을 구성하세요.)
+        3. **핵심 인사이트 박스**: `> **💡 핵심 인사이트**` 형태의 Markdown 인용구를 활용.
+        4. **실무 활용 팁 / 주의사항**: 실생활/업무 활용 꿀팁 안내.
+        5. **분량 지침**: {length_instruction}
 
-        ---
-
-        ### [파트 2: 적응형 인터랙티브 학습 장치 (본문 최하단 부록)]
-        위 파트 1의 본문 서술이 완전히 끝난 후, 맨 마지막에 챕터의 핵심 성격에 맞는 특수한 인터랙티브 태그를 **정확히 하나만** 부착하십시오.
+        (본문이 끝난 직후 아래 태그 중 1개만 부착 - 메타 텍스트 없이 태그만)
 
         [주의사항]
         - 반드시 여는 태그와 닫는 태그(예: `<feynman>` ... `</feynman>`)로 전체 JSON을 감싸야 합니다.
@@ -718,8 +776,9 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
             f"다음은 분석할 원본 영상 전체 스크립트입니다:\n\n{chunked_context}\n\n"
             f"=======================================================\n"
             f"[작성 지시: 챕터 '{section_title}']\n"
-            f"위 스크립트를 분석하여 '{section_title}'에 대한 [파트 1: 상세 서술형 학습 본문]을 마크다운(# {section_title})으로 먼저 풍부하게 작성({target_min_chars}자 이상)하고, 맨 마지막에 [파트 2: 인터랙티브 학습 장치] 태그를 부착하세요.\n"
-            f"- [도입부 인삿말 완전 금지]: '안녕하세요', '여러분의 튜터입니다' 등 의례적인 인사말/자기소개를 절대 쓰지 말고, 챕터의 핵심 질문(Why/What) 또는 흥미로운 실무 배경 한 줄로 곧바로 시작하십시오.\n"
+            f"위 스크립트를 분석하여 '{section_title}'에 대한 마크다운 서술형 학습 본문을 먼저 풍부하게 작성({target_min_chars}자 이상)하고, 맨 마지막에 인터랙티브 학습 장치 태그 1개를 부착하세요.\n"
+            f"- [도입부 인삿말/자기소개 완전 금지]: '안녕하세요', '여러분의 튜터입니다' 등 의례적인 인사말/자기소개를 절대 쓰지 말고, 챕터의 핵심 질문(Why/What) 또는 흥미로운 실무 배경 한 줄로 곧바로 시작하십시오.\n"
+            f"- [메타 텍스트 금지]: '[파트 1...]', '[파트 2...]' 같은 안내용 텍스트를 절대 출력하지 마십시오.\n"
             f"- 원본 언어가 외국어(영어 등)라도 모든 내용은 100% 자연스러운 한국어로 번역 및 해설하여 작성하십시오.\n"
             f"- 절대로 XML 태그나 JSON으로 바로 시작하지 마십시오. 반드시 마크다운 대제목과 핵심 문제 제기 본문부터 시작하십시오!"
         )
@@ -809,6 +868,7 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
                 return _call_gemini_with_retry()
 
     result = await loop.run_in_executor(None, _call_api)
+    result = sanitize_chapter_narrative(result, section_title)
     
     # 검증 및 자동 재시도 루프 (최대 3회)
     max_validation_attempts = 3
@@ -832,14 +892,16 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
             
             escalation = (
                 f"\n\n[🚨 치명적 오류 수정 지시: 2단계 엄격 출력 구조 위반 ({reason})]\n"
-                f"이전 출력에서 서술형 학습 본문이 누락되거나 분량이 부족했습니다.\n"
-                f"반드시 마크다운 대제목(# {section_title})으로 시작하여, 최소 {target_min_chars}자 이상의 친절하고 깊이 있는 한국어 서술형 본문(도입, 상세 원리 및 비유, 핵심 인사이트 박스, 실무 팁)을 먼저 완벽히 작성한 뒤, 맨 마지막에만 1개의 인터랙티브 태그를 부착하십시오!\n"
+                f"이전 출력에서 서술형 학습 본문이 누락되거나 분량이 부족했거나, 인사말/메타텍스트가 포함되었습니다.\n"
+                f"절대로 인사말(안녕하세요, 반갑습니다, 여러분의 튜터입니다 등)이나 메타 태그([파트 1...])를 출력하지 마십시오!\n"
+                f"반드시 마크다운 대제목(## {section_title})으로 시작하여, 최소 {target_min_chars}자 이상의 깊이 있는 한국어 서술형 본문(도입 훅, 상세 원리 및 비유, 핵심 인사이트 박스, 실무 팁)을 먼저 완벽히 작성한 뒤, 맨 마지막에만 1개의 인터랙티브 태그를 부착하십시오!\n"
                 f"절대로 XML 태그로 바로 시작하거나 본문 없이 태그만 출력하지 마십시오!\n"
             )
             current_system_prompt = escalation + base_system_prompt
             current_user_instruction = escalation + base_user_instruction
             try:
-                result = await loop.run_in_executor(None, _call_api)
+                raw_retry = await loop.run_in_executor(None, _call_api)
+                result = sanitize_chapter_narrative(raw_retry, section_title)
             except Exception as retry_err:
                 print(f"[Narrative Retry Error] Retry attempt {attempt+1} failed: {retry_err}")
 
@@ -865,8 +927,8 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
                 tag_block = trimmed_res
 
             result = (
-                f"# {section_title}\n\n"
-                f"안녕하세요! 이번 챕터에서는 **{section_title}**의 핵심 개념과 주요 메커니즘을 상세히 학습해 보겠습니다.\n\n"
+                f"## {section_title}\n\n"
+                f"**{section_title}**의 핵심 개념과 주요 동작 메커니즘을 상세히 짚어보겠습니다.\n\n"
                 f"### 1. 도입 및 핵심 원리 소개\n"
                 f"{section_title}은 시스템과 알고리즘의 동작에서 매우 중요한 위치를 차지합니다. "
                 f"기초 개념을 충실히 다지고 단계별 흐름을 파악함으로써 전체적인 이해도를 크게 높일 수 있습니다.\n\n"
@@ -880,6 +942,8 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
                 f"- 성능 최적화와 예외 처리 패턴을 설계 초기부터 고려하여 안정성을 확보하십시오.\n\n"
                 f"{tag_block}"
             )
+
+    result = sanitize_chapter_narrative(result, section_title)
 
     # 캐시 저장 전 최종 검증
     if length_preset == "문서 원본 번역":

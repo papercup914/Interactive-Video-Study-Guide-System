@@ -142,9 +142,11 @@ def get_video_metadata(url: str) -> dict:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             duration_sec = info.get('duration', 0) if info else 0
+            chapters = info.get('chapters') if info else None
             return {
                 "title": (info.get('title') if info else '제목 알 수 없음') or '제목 알 수 없음',
-                "duration": duration_sec
+                "duration": duration_sec,
+                "chapters": chapters
             }
     except Exception:
         return {"title": '제목 알 수 없음', "duration": 0}
