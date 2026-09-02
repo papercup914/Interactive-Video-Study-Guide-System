@@ -31,6 +31,8 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
         is_document = False
         raw_title = ""
         transcript = ""
+        video_chapters = None
+        video_duration = 0
         
         if file_paths and len(file_paths) > 0:
             is_document = True
@@ -63,14 +65,26 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
             if len(file_paths) > 1:
                 raw_title = f"{raw_title} 외 {len(file_paths)-1}건"
         elif "youtube.com" in url or "youtu.be" in url:
-            update_job_status(job_id, "transcribing", "유튜브 자막 및 오디오 추출 중...")
             from backend.services.video import extract_video_id
             vid = extract_video_id(url)
             canonical_url = f"https://www.youtube.com/watch?v={vid}" if vid else url
-            
+            url_hash = get_url_hash(canonical_url)
+
+            # 1. 메타데이터(제목, 재생 시간, 공식 챕터)를 최우선으로 먼저 추출
+            update_job_status(job_id, "transcribing", "유튜브 메타데이터 및 챕터 정보 확인 중...")
+            metadata = await loop.run_in_executor(None, get_video_metadata, canonical_url)
+            if metadata and metadata.get("title") and metadata["title"] != "제목 알 수 없음":
+                raw_title = metadata["title"]
+                video_duration = metadata.get("duration", 0)
+                video_chapters = metadata.get("chapters")
+            elif not raw_title:
+                raw_title = "유튜브 학습 가이드"
+
+            # 2. 자막(Transcript) 추출 (Innertube 모바일 API -> 쿠키 세션 -> 기본 세션 -> yt-dlp)
+            update_job_status(job_id, "transcribing", "유튜브 자막 추출 중...")
             transcript = await loop.run_in_executor(None, get_youtube_transcript, canonical_url)
-            url_hash = get_url_hash(canonical_url) if transcript else None
             
+            # 3. 자막이 없는 경우 오디오 다운로드 후 AI 음성 인식(Whisper/Gemini) 실행
             if not transcript or len(transcript.strip()) < 50:
                 update_job_status(job_id, "downloading_audio", "자막 없음. 오디오 다운로드 시도 중...")
                 try:
@@ -82,22 +96,19 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
                     print(f"[Tasks] YouTube audio download failed/blocked: {audio_err}. Falling back to Jina Reader...")
                     update_job_status(job_id, "transcribing", "클라우드 환경 우회: 웹 분석 엔진(Jina Reader)으로 영상 정보 추출 중...")
                     try:
-                        transcript, jina_title = await loop.run_in_executor(None, extract_text_from_web, canonical_url)
-                        url_hash = get_url_hash(canonical_url)
-                        if not raw_title or raw_title == "제목 알 수 없음":
+                        jina_text, jina_title = await loop.run_in_executor(None, extract_text_from_web, canonical_url)
+                        # 유튜브 페이지를 Jina로 긁었을 때 약관/푸터 찌꺼기 텍스트인지 철저히 검증
+                        junk_keywords = ["YouTube 정보", "저작권", "크리에이터", "광고 개발자", "약관 및 개인정보 보호", "About Press Copyright"]
+                        is_junk = any(kw in jina_text for kw in junk_keywords) and len(jina_text) < 1500
+                        if is_junk or len(jina_text.strip()) < 300:
+                            print(f"[Tasks] Jina Reader returned invalid YouTube page junk ({len(jina_text)} chars). Rejecting.")
+                            raise ValueError(f"유튜브 영상의 자막 및 오디오를 가져올 수 없습니다 ({audio_err}).")
+                        transcript = jina_text
+                        if not raw_title or raw_title == "제목 알 수 없음" or raw_title == "유튜브 학습 가이드":
                             raw_title = jina_title
                     except Exception as jina_err:
-                        print(f"[Tasks] Jina fallback failed: {jina_err}")
-                        raise audio_err
-                
-            metadata = await loop.run_in_executor(None, get_video_metadata, canonical_url)
-            video_chapters = None
-            if metadata and metadata.get("title") and metadata["title"] != "제목 알 수 없음":
-                raw_title = metadata["title"]
-                video_duration = metadata.get("duration", 0)
-                video_chapters = metadata.get("chapters")
-            elif not raw_title:
-                raw_title = "유튜브 학습 가이드"
+                        print(f"[Tasks] All YouTube extraction methods failed: {jina_err}")
+                        raise ValueError(f"유튜브 영상의 자막 및 오디오를 가져올 수 없습니다. 클라우드 IP 차단 해제를 위해 cookies.txt 설정이 필요합니다. (원인: {audio_err})")
         else:
             update_job_status(job_id, "transcribing", "웹 페이지 텍스트 추출 중 (Jina Reader)...")
             transcript, raw_title = await loop.run_in_executor(None, extract_text_from_web, url)
@@ -146,8 +157,6 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
                 print(f"Failed to upload transcript for Context Caching: {e}")
             
         update_job_status(job_id, "generating_outline", "목차 구조 설계 중...")
-        # Get video chapters variable safely
-        video_chapters = locals().get("video_chapters")
         sections = await loop.run_in_executor(None, generate_outline, master_summary, provider, url_hash, length_preset, force_refresh, video_chapters)
         
         document = {}

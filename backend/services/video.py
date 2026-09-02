@@ -170,10 +170,10 @@ def extract_video_id(url: str) -> str:
             return parsed_url.path.split('/')[2]
     return None
 
-def _fetch_innertube_captions(video_id: str) -> str | None:
+def _fetch_innertube_captions(video_id: str, cookie_file: str | None = None) -> str | None:
     """
-    YouTube Innertube Android 모바일 API를 통해 자막을 직접 가져옵니다.
-    최신 Android 20.10.38 클라이언트 및 API Key 연동으로 클라우드 IP에서도 안정적으로 작동합니다.
+    YouTube Innertube Android/iOS/Embedded 모바일 API를 통해 자막을 직접 가져옵니다.
+    쿠키 세션 지원 및 다중 클라이언트 후보군으로 클라우드 IP에서도 안정적으로 작동합니다.
     """
     import xml.etree.ElementTree as ET
     import html
@@ -181,29 +181,44 @@ def _fetch_innertube_captions(video_id: str) -> str | None:
     
     if not video_id:
         return None
+
+    session = get_transcript_session(cookie_file)
         
     try:
-        # 1. HTML 요청으로 INNERTUBE_API_KEY 추출 (실패 시 기본 키 사용)
+        # 1. HTML 요청으로 INNERTUBE_API_KEY 추출 시도 (실패 시 기본 키 사용)
         api_key = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"
         try:
-            r_html = requests.get(
+            r_html = session.get(
                 f"https://www.youtube.com/watch?v={video_id}",
                 headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
-                timeout=6
+                timeout=5
             )
             if r_html.status_code == 200:
                 match = re.search(r'"INNERTUBE_API_KEY":\s*"([a-zA-Z0-9_-]+)"', r_html.text)
                 if match:
                     api_key = match.group(1)
-        except Exception as e:
-            print(f"[Transcript] Innertube API Key 추출 경고 (기본 키 fallback 사용): {e}")
+        except Exception:
+            pass
 
-        # 2. 클라이언트 후보군 (ANDROID 20.10.38 최우선)
+        # 2. 다중 클라이언트 후보군 (ANDROID, IOS, WEB_EMBEDDED)
         clients = [
             {
                 "clientName": "ANDROID",
                 "clientVersion": "20.10.38",
                 "androidSdkVersion": 34,
+                "hl": "ko",
+                "gl": "KR"
+            },
+            {
+                "clientName": "IOS",
+                "clientVersion": "19.29.1",
+                "deviceModel": "iPhone16,2",
+                "hl": "ko",
+                "gl": "KR"
+            },
+            {
+                "clientName": "WEB_EMBEDDED_PLAYER",
+                "clientVersion": "1.20240401.01.00",
                 "hl": "ko",
                 "gl": "KR"
             },
@@ -230,7 +245,7 @@ def _fetch_innertube_captions(video_id: str) -> str | None:
             }
 
             try:
-                r = requests.post(url, json=payload, headers=headers, timeout=10)
+                r = session.post(url, json=payload, headers=headers, timeout=10)
                 if r.status_code == 200:
                     data = r.json()
                     captions = data.get("captions", {}).get("playerCaptionsTracklistRenderer", {}).get("captionTracks", [])
@@ -352,12 +367,12 @@ def get_youtube_transcript(url: str) -> str | None:
     if not video_id:
         return None
         
-    # 0차 시도: YouTube Innertube Android 모바일 API (AWS IP 차단 우회, 초고속)
-    innertube_result = _fetch_innertube_captions(video_id)
+    cookie_file = get_cookie_file()
+    
+    # 0차 시도: YouTube Innertube 모바일 API (다중 클라이언트 + 쿠키 세션, 초고속)
+    innertube_result = _fetch_innertube_captions(video_id, cookie_file)
     if innertube_result:
         return innertube_result
-        
-    cookie_file = get_cookie_file()
     
     # 1차 시도: 쿠키 세션 적용
     if cookie_file:

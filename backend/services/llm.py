@@ -366,7 +366,9 @@ def generate_outline(context_data: str, provider: str, url_hash: str, length_pre
         prompt = f"""
         주어진 내용(오디오 또는 스크립트)을 분석하여 학습용 목차(Outline)를 작성해줘.
         {outline_instruction}
-        - [중요] 반드시 영상의 시간적 흐름(Time Sequence)을 엄격히 준수하여 순서대로 나열할 것. 사건의 전후 관계나 목차의 순서를 임의로 섞지 마세요.
+        - [🚨 최우선 절대 준수: 시간 순서(Time Sequence) 엄격 유지]
+          반드시 영상의 시작(도입/개요)부터 중간(핵심 내용/원리/실습), 끝(결론/마무리/전망) 순서대로 시간 흐름에 맞게 나열해야 합니다.
+          절대로 '결론'이나 '마무리'가 1번이나 앞부분에 오거나, '도입'이나 '개요'가 뒷부분에 오는 역순(Inversion)으로 작성하지 마십시오!
         - [중요] 원본 스크립트가 외국어(영어 등)이더라도, 각 목차 항목의 제목은 반드시 자연스럽고 명확한 한국어로 번역하여 작성하세요.
         - 각 목차 항목은 번호나 기호 없이 새로운 줄에 순수 한국어 제목만 하나씩 작성해줘. (예: 대형 언어 모델의 생태계와 작동 원리)
         """
@@ -453,6 +455,21 @@ def generate_outline(context_data: str, provider: str, url_hash: str, length_pre
             
     if not sections:
         sections = ["전체 내용 요약"]
+    else:
+        # 시간 순서 역순(Inversion) 감지 및 자동 교정 가드레일
+        conclusion_keywords = ("결론", "마무리", "총평", "끝마치며", "마치며", "최종 요약")
+        intro_keywords = ("도입", "개요", "시작", "소개", "오프닝", "시작하며", "프롤로그")
+        
+        first_is_conclusion = any(kw in sections[0] for kw in conclusion_keywords)
+        last_is_intro = any(kw in sections[-1] for kw in intro_keywords)
+        
+        if first_is_conclusion and last_is_intro:
+            print(f"[Outline Guardrail] Chronological inversion detected ({sections[0]} <-> {sections[-1]}). Reversing outline order!")
+            sections.reverse()
+        elif first_is_conclusion and len(sections) > 1:
+            print(f"[Outline Guardrail] Conclusion at start detected ({sections[0]}). Moving to end!")
+            conclusion_item = sections.pop(0)
+            sections.append(conclusion_item)
         
     with open(cache_file, "w", encoding="utf-8") as f:
         json.dump(sections, f, ensure_ascii=False)
