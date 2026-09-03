@@ -117,11 +117,12 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
             is_document = True
             
         tutor_persona = None
+        profile_result = {}
         if is_document:
             length_preset = "문서 원본 번역"
         else:
             update_job_status(job_id, "analyzing_context", "AI가 영상 성격을 분석하여 최적의 톤과 페르소나를 계산 중...")
-            profile_result = await loop.run_in_executor(None, profile_content, transcript, provider)
+            profile_result = await loop.run_in_executor(None, profile_content, transcript, provider) or {}
             
             if length_preset == "Auto":
                 length_preset = profile_result.get("length_preset", "적당한 설명")
@@ -166,7 +167,7 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
         if not force_refresh:
             completed_chapters = get_completed_chapters(job_id)
         
-        concurrency_limit = 3
+        concurrency_limit = int(os.getenv("CHAPTER_GENERATION_CONCURRENCY", "3"))
         semaphore = asyncio.Semaphore(concurrency_limit)
         
         async def process_section(idx: int, section_title: str):
@@ -241,7 +242,7 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
         finish_job(job_id, document, url, translated_title)
         
         generation_time_sec = int(time.time() - start_time)
-        pm = profile_result.get("profile_message", "") if 'profile_result' in locals() else ""
+        pm = profile_result.get("profile_message", "")
         save_study_guide(job_id, url, translated_title, "", provider, document, learner_profile, pm, generation_time_sec, length_preset, analogy_preset, str(video_duration))
         
     except Exception as e:

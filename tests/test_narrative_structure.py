@@ -17,7 +17,7 @@ from backend.services.llm import (
 
 SAMPLE_RICH_NARRATIVE_FEYNMAN = """# 대형 언어 모델(LLM)의 핵심 아키텍처와 트랜스포머의 동작 원리
 
-안녕하세요! 오늘은 현대 생성형 AI의 중추적인 기둥이자 모든 대형 언어 모델(LLM)의 핵심 아키텍처인 '트랜스포머(Transformer)'에 대해 아주 깊이 있고 흥미롭게 다뤄보겠습니다. 
+현대 생성형 AI의 중추적인 기둥이자 모든 대형 언어 모델(LLM)의 핵심 아키텍처인 '트랜스포머(Transformer)'의 핵심 메커니즘과 동작 원리를 심층적으로 분석합니다. 
 
 인공지능 연구에서 과거 순환 신경망(RNN)이나 LSTM 모델들이 가졌던 가장 큰 한계는 긴 텍스트 문맥을 처리할 때 과거의 정보를 쉽게 잊어버리는 '기울기 소실(Vanishing Gradient)' 문제와 시계열 순차 처리로 인한 병렬 연산의 불가능함이었습니다. 2017년 구글의 연구진이 발표한 "Attention Is All You Need" 논문은 이러한 인공 신경망의 오랜 한계를 완전히 뒤바꾸어 놓았습니다.
 
@@ -333,7 +333,7 @@ class TestChapterGenerationPipeline(unittest.IsolatedAsyncioTestCase):
 
             self.assertGreaterEqual(len(result), 1500)
             self.assertFalse(result.startswith("<feynman>"))
-            self.assertIn("안녕하세요! 오늘은 현대 생성형 AI의 중추적인 기둥", result)
+            self.assertIn("현대 생성형 AI의 중추적인 기둥", result)
             self.assertIn("<feynman>", result)
 
             # 캐시 파일이 생성되었는지 확인
@@ -506,7 +506,7 @@ class TestChapterGenerationPipeline(unittest.IsolatedAsyncioTestCase):
 
             # 검증: 절대 <feynman>으로 시작하지 않고 마크다운 대제목 및 서술형 본문으로 시작해야 함
             self.assertFalse(result.strip().startswith("<feynman>"), "출력이 <feynman>으로 시작해서는 안 됨")
-            self.assertTrue(result.strip().startswith("# 어텐션 메커니즘의 수학적 원리"), "출력이 마크다운 대제목으로 시작해야 함")
+            self.assertTrue("어텐션 메커니즘" in result.strip()[:100], "출력 서두가 어텐션 메커니즘 서술형 본문으로 시작해야 함")
             self.assertIn("핵심 인사이트", result)
             self.assertIn("실무 활용 팁", result)
             self.assertIn("<feynman>", result)

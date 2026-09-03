@@ -229,6 +229,25 @@ async def get_admin_health(
     elif error_rate >= 10 or total_errors > 3:
         system_status = 'Degraded'
 
+    real_stats = {
+        "dbConnected": True,
+        "totalJobs": 0,
+        "failedJobs": 0,
+        "completedJobs": 0,
+        "totalBatchJobs": 0
+    }
+    try:
+        from backend.data.database import SessionLocal
+        from backend.data.models import Job, BatchJob
+        with SessionLocal() as db:
+            real_stats["totalJobs"] = db.query(Job).count()
+            real_stats["failedJobs"] = db.query(Job).filter(Job.error.isnot(None)).count()
+            real_stats["completedJobs"] = db.query(Job).filter(Job.status == "completed").count()
+            real_stats["totalBatchJobs"] = db.query(BatchJob).count()
+    except Exception as e:
+        real_stats["dbConnected"] = False
+        real_stats["error"] = str(e)
+
     summary = {
         "systemStatus": system_status,
         "totalLogs": total_logs,
@@ -241,6 +260,8 @@ async def get_admin_health(
     }
 
     return {
+        "is_mock": True,
+        "real_stats": real_stats,
         "summary": summary,
         "timeSeries": time_series,
         "categoryBreakdown": category_breakdown,

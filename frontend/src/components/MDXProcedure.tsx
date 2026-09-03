@@ -11,33 +11,18 @@ interface ProcedureData {
   }[];
 }
 
-const extractText = (node: any): string => {
-  if (typeof node === 'string') return node;
-  if (Array.isArray(node)) return node.map(extractText).join('');
-  if (node && node.props && node.props.children) return extractText(node.props.children);
-  return '';
-};
+import { InteractiveWidgetBase } from './InteractiveWidgetBase';
 
-export default function MDXProcedure(props: any) {
-  const rawJson = extractText(props?.children).trim();
-  const cleanJson = rawJson
-    .replace(/```[\w-]*\n?/g, '')
-    .replace(/```/g, '')
-    .replace(/`/g, '')
-    .replace(/,\s*([\]}])/g, '$1')
-    .trim();
-  let data: ProcedureData | null = null;
-  
-  try {
-    data = JSON.parse(cleanJson);
-  } catch (e) {
-    console.warn("Failed to parse procedure JSON", e, rawJson);
-    return <div className="p-4 bg-amber-500/10 text-amber-600 rounded-xl my-4 text-sm font-bold border border-amber-500/20">⚠️ AI가 생성한 인터랙티브 요소를 불러올 수 없습니다. (형식 오류)</div>;
-  }
-
-  if (!data || !data.checklists || data.checklists.length === 0) return null;
-
-  return <ProcedureUI data={data} />;
+export default function MDXProcedure(props: { children?: React.ReactNode }) {
+  return (
+    <InteractiveWidgetBase<ProcedureData>
+      fallbackName="절차 체크리스트(Procedure) 위젯"
+      render={(data) => <ProcedureUI data={data} />}
+      validate={(data) => Boolean(data && Array.isArray(data.checklists) && data.checklists.length > 0)}
+    >
+      {props.children}
+    </InteractiveWidgetBase>
+  );
 }
 
 function ProcedureUI({ data }: { data: ProcedureData }) {

@@ -1,12 +1,12 @@
 import json
 import os
 from typing import Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from backend.data.database import SessionLocal, engine
 from backend.data.models import Base, Job, JobCheckpoint, StudyGuide, BatchJob, BatchVideoItem
 from typing import List, Optional
 
-from sqlalchemy import text
+from sqlalchemy import text, or_
 
 # Create tables if they don't exist
 Base.metadata.create_all(bind=engine)
@@ -31,6 +31,24 @@ except Exception as e:
     print(f"[DB Migration Warning] {e}")
 
 
+def _format_datetime(val) -> str:
+    """datetime 객체 또는 ISO 문자열을 안전하게 ISO 포맷 문자열로 통일합니다."""
+    if val is None:
+        return ""
+    if hasattr(val, "isoformat"):
+        return val.isoformat()
+    return str(val)
+
+def _parse_datetime(val) -> datetime:
+    """문자열 또는 None을 datetime 객체로 안전하게 변환합니다."""
+    if val is None:
+        return datetime.now(timezone.utc)
+    if isinstance(val, datetime):
+        return val
+    try:
+        return datetime.fromisoformat(str(val))
+    except Exception:
+        return datetime.now(timezone.utc)
 
 def get_study_guide(job_id: str) -> dict:
     with SessionLocal() as db:
@@ -58,7 +76,7 @@ def get_study_guide(job_id: str) -> dict:
             "url": guide.url,
             "title": guide.title,
             "image_url": guide.image_url,
-            "date": guide.created_at,
+            "date": _format_datetime(guide.created_at),
             "provider": guide.provider,
             "document": document,
             "notes": notes,
@@ -133,7 +151,7 @@ def get_job(job_id: str) -> Dict[str, Any]:
             "url": job.url,
             "title": job.title,
             "error": job.error,
-            "created_at": job.created_at
+            "created_at": _format_datetime(job.created_at)
         }
         return job_dict
 
@@ -210,7 +228,7 @@ def get_all_study_guides() -> list:
                 "url": guide.url,
                 "title": guide.title,
                 "image_url": guide.image_url,
-                "date": guide.created_at,
+                "date": _format_datetime(guide.created_at),
                 "provider": guide.provider,
                 "document": document,
                 "learning_profile": profile,
@@ -245,9 +263,9 @@ def create_batch_job(
     sync_key: str = None
 ) -> dict:
     with SessionLocal() as db:
-        now_str = datetime.now().isoformat()
+        now_dt = datetime.now(timezone.utc)
         initial_log = json.dumps([
-            {"timestamp": now_str, "message": "배치 작업이 생성되었습니다. 수집을 준비합니다.", "level": "info"}
+            {"timestamp": now_dt.isoformat(), "message": "배치 작업이 생성되었습니다. 수집을 준비합니다.", "level": "info"}
         ], ensure_ascii=False)
         
         existing = db.query(BatchJob).filter(BatchJob.id == batch_id).first()
@@ -262,7 +280,7 @@ def create_batch_job(
             existing.sync_key = sync_key or existing.sync_key
             existing.status = "pending"
             existing.logs = initial_log
-            existing.updated_at = now_str
+            existing.updated_at = now_dt
         else:
             job = BatchJob(
                 id=batch_id,
@@ -282,8 +300,8 @@ def create_batch_job(
                 remote_url=remote_url,
                 sync_key=sync_key,
                 logs=initial_log,
-                created_at=now_str,
-                updated_at=now_str
+                created_at=now_dt,
+                updated_at=now_dt
             )
             db.add(job)
         db.commit()
@@ -312,7 +330,7 @@ def append_batch_log(batch_id: str, message: str, level: str = "info") -> None:
             log_list = log_list[-300:]
             
         job.logs = json.dumps(log_list, ensure_ascii=False)
-        job.updated_at = now_str
+        job.updated_at = datetime.now(timezone.utc)
         db.commit()
 
 def update_batch_job_status(batch_id: str, status: str = None, total: int = None, completed: int = None, failed: int = None, skipped: int = None, error: str = None, title: str = None) -> None:
@@ -334,7 +352,7 @@ def update_batch_job_status(batch_id: str, status: str = None, total: int = None
             job.error = error
         if title is not None:
             job.title = title
-        job.updated_at = datetime.now().isoformat()
+        job.updated_at = datetime.now(timezone.utc)
         db.commit()
 
 def update_batch_job_sync(batch_id: str, sync_status: str, sync_error: str = None) -> None:
@@ -344,7 +362,7 @@ def update_batch_job_sync(batch_id: str, sync_status: str, sync_error: str = Non
             return
         job.sync_status = sync_status
         job.sync_error = sync_error
-        job.updated_at = datetime.now().isoformat()
+        job.updated_at = datetime.now(timezone.utc)
         db.commit()
 
 def get_batch_job(batch_id: str) -> Optional[dict]:
@@ -377,8 +395,8 @@ def get_batch_job(batch_id: str) -> Optional[dict]:
             "sync_key": job.sync_key,
             "error": job.error,
             "logs": log_list,
-            "created_at": job.created_at,
-            "updated_at": job.updated_at
+            "created_at": _format_datetime(job.created_at),
+            "updated_at": _format_datetime(job.updated_at)
         }
 
 def get_all_batch_jobs() -> List[dict]:
@@ -405,8 +423,8 @@ def get_all_batch_jobs() -> List[dict]:
                 "remote_url": job.remote_url,
                 "sync_key": job.sync_key,
                 "error": job.error,
-                "created_at": job.created_at,
-                "updated_at": job.updated_at
+                "created_at": _format_datetime(job.created_at),
+                "updated_at": _format_datetime(job.updated_at)
             })
         return result
 
@@ -415,12 +433,12 @@ def cancel_batch_job(batch_id: str) -> None:
         job = db.query(BatchJob).filter(BatchJob.id == batch_id).first()
         if job:
             job.status = "cancelled"
-            job.updated_at = datetime.now().isoformat()
+            job.updated_at = datetime.now(timezone.utc)
             db.commit()
 
 def create_batch_video_items(batch_id: str, videos: List[dict]) -> List[dict]:
     with SessionLocal() as db:
-        now_str = datetime.now().isoformat()
+        now_dt = datetime.now(timezone.utc)
         items = []
         for v in videos:
             vid = v.get("id") or v.get("video_id") or ""
@@ -439,8 +457,8 @@ def create_batch_video_items(batch_id: str, videos: List[dict]) -> List[dict]:
                     error=None,
                     sync_status="pending",
                     presets_generated=0,
-                    created_at=now_str,
-                    updated_at=now_str
+                    created_at=now_dt,
+                    updated_at=now_dt
                 )
                 db.add(item)
         db.commit()
@@ -459,7 +477,7 @@ def update_batch_video_item(item_id: str, status: str = None, error: str = None,
             item.presets_generated = presets_generated
         if sync_status is not None:
             item.sync_status = sync_status
-        item.updated_at = datetime.now().isoformat()
+        item.updated_at = datetime.now(timezone.utc)
         db.commit()
 
 def get_batch_video_items(batch_id: str) -> List[dict]:
@@ -479,17 +497,28 @@ def get_batch_video_items(batch_id: str) -> List[dict]:
                 "error": item.error,
                 "sync_status": item.sync_status or "pending",
                 "presets_generated": item.presets_generated or 0,
-                "created_at": item.created_at,
-                "updated_at": item.updated_at
+                "created_at": _format_datetime(item.created_at),
+                "updated_at": _format_datetime(item.updated_at)
             })
         return result
 
 def get_all_presets_for_video(video_url: str) -> List[dict]:
     """해당 비디오 URL에 대해 생성되어 저장된 모든 프리셋 가이드 목록을 반환합니다."""
+    if not video_url:
+        return []
+        
     with SessionLocal() as db:
         from backend.services.video import extract_video_id
         target_vid = extract_video_id(video_url) if video_url else ""
-        guides = db.query(StudyGuide).all()
+        
+        # DB 레벨 필터링으로 전체 풀스캔 방지
+        if target_vid:
+            guides = db.query(StudyGuide).filter(
+                or_(StudyGuide.url == video_url, StudyGuide.url.contains(target_vid))
+            ).all()
+        else:
+            guides = db.query(StudyGuide).filter(StudyGuide.url == video_url).all()
+            
         matched = []
         for g in guides:
             g_vid = extract_video_id(g.url or "")
@@ -512,7 +541,7 @@ def get_all_presets_for_video(video_url: str) -> List[dict]:
                     "analogy_preset": g.analogy_preset,
                     "video_duration": g.video_duration,
                     "notes": g.notes,
-                    "created_at": g.created_at
+                    "created_at": _format_datetime(g.created_at)
                 })
         return matched
 
@@ -564,7 +593,7 @@ def upsert_study_guide_from_sync(guide_data: dict) -> bool:
                 analogy_preset=guide_data.get("analogy_preset"),
                 video_duration=guide_data.get("video_duration"),
                 notes=notes_json,
-                created_at=guide_data.get("created_at") or datetime.now().isoformat()
+                created_at=_parse_datetime(guide_data.get("created_at"))
             )
             db.add(new_guide)
         db.commit()

@@ -11,33 +11,18 @@ interface MnemonicData {
   }[];
 }
 
-const extractText = (node: any): string => {
-  if (typeof node === 'string') return node;
-  if (Array.isArray(node)) return node.map(extractText).join('');
-  if (node && node.props && node.props.children) return extractText(node.props.children);
-  return '';
-};
+import { InteractiveWidgetBase } from './InteractiveWidgetBase';
 
-export default function MDXMnemonic(props: any) {
-  const rawJson = extractText(props?.children).trim();
-  const cleanJson = rawJson
-    .replace(/```[\w-]*\n?/g, '')
-    .replace(/```/g, '')
-    .replace(/`/g, '')
-    .replace(/,\s*([\]}])/g, '$1')
-    .trim();
-  let data: MnemonicData | null = null;
-  
-  try {
-    data = JSON.parse(cleanJson);
-  } catch (e) {
-    console.warn("Failed to parse mnemonic JSON", e, rawJson);
-    return <div className="p-4 bg-amber-500/10 text-amber-600 rounded-xl my-4 text-sm font-bold border border-amber-500/20">⚠️ AI가 생성한 인터랙티브 요소를 불러올 수 없습니다. (형식 오류)</div>;
-  }
-
-  if (!data || (!data.story && (!data.flashcards || data.flashcards.length === 0))) return null;
-
-  return <MnemonicUI data={data} />;
+export default function MDXMnemonic(props: { children?: React.ReactNode }) {
+  return (
+    <InteractiveWidgetBase<MnemonicData>
+      fallbackName="연상 기억법(Mnemonic) 위젯"
+      render={(data) => <MnemonicUI data={data} />}
+      validate={(data) => Boolean(data && (data.story || (Array.isArray(data.flashcards) && data.flashcards.length > 0)))}
+    >
+      {props.children}
+    </InteractiveWidgetBase>
+  );
 }
 
 function MnemonicUI({ data }: { data: MnemonicData }) {

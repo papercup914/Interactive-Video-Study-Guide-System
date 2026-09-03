@@ -21,3 +21,5 @@ certifi
 python-multipart
 openai
 yt-dlp-ejs
+pydantic-settings
+pytest

@@ -170,13 +170,44 @@ def extract_video_id(url: str) -> str:
             return parsed_url.path.split('/')[2]
     return None
 
+def _select_best_caption_track(captions: list) -> dict | None:
+    """자막 트랙 목록 중 한국어 > 영어 > 기본 순위로 최적 트랙을 선택합니다."""
+    if not captions:
+        return None
+    # 1. 한국어 검색
+    for c in captions:
+        if "ko" in c.get("languageCode", "").lower():
+            return c
+    # 2. 영어 검색
+    for c in captions:
+        if "en" in c.get("languageCode", "").lower():
+            return c
+    # 3. 기본 첫 번째 트랙
+    return captions[0]
+
+
+def _download_caption_text_from_url(url: str, session: requests.Session) -> str | None:
+    """자막 XML URL에서 자막 텍스트를 다운로드하고 파싱합니다."""
+    import xml.etree.ElementTree as ET
+    import html
+    try:
+        sub_r = session.get(url, timeout=15)
+        if sub_r.status_code == 200 and len(sub_r.text) > 0:
+            root = ET.fromstring(sub_r.text)
+            texts = [elem.text.strip() for elem in root.iter() if elem.text and elem.text.strip()]
+            candidate = html.unescape(" ".join(texts)).strip()
+            if candidate and len(candidate) > 30:
+                return candidate
+    except Exception:
+        pass
+    return None
+
+
 def _fetch_innertube_captions(video_id: str, cookie_file: str | None = None) -> str | None:
     """
     YouTube Innertube Android/iOS/Embedded 모바일 API를 통해 자막을 직접 가져옵니다.
     쿠키 세션 지원 및 다중 클라이언트 후보군으로 클라우드 IP에서도 안정적으로 작동합니다.
     """
-    import xml.etree.ElementTree as ET
-    import html
     import re
     
     if not video_id:
@@ -185,8 +216,8 @@ def _fetch_innertube_captions(video_id: str, cookie_file: str | None = None) -> 
     session = get_transcript_session(cookie_file)
         
     try:
-        # 1. HTML 요청으로 INNERTUBE_API_KEY 추출 시도 (실패 시 기본 키 사용)
-        api_key = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"
+        # 1. HTML 요청으로 INNERTUBE_API_KEY 추출 시도 (실패 시 환경변수 또는 기본 키 사용)
+        api_key = os.getenv("YOUTUBE_INNERTUBE_KEY", "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8")
         try:
             r_html = session.get(
                 f"https://www.youtube.com/watch?v={video_id}",
@@ -200,34 +231,11 @@ def _fetch_innertube_captions(video_id: str, cookie_file: str | None = None) -> 
         except Exception:
             pass
 
-        # 2. 다중 클라이언트 후보군 (ANDROID, IOS, WEB_EMBEDDED)
         clients = [
-            {
-                "clientName": "ANDROID",
-                "clientVersion": "20.10.38",
-                "androidSdkVersion": 34,
-                "hl": "ko",
-                "gl": "KR"
-            },
-            {
-                "clientName": "IOS",
-                "clientVersion": "19.29.1",
-                "deviceModel": "iPhone16,2",
-                "hl": "ko",
-                "gl": "KR"
-            },
-            {
-                "clientName": "WEB_EMBEDDED_PLAYER",
-                "clientVersion": "1.20240401.01.00",
-                "hl": "ko",
-                "gl": "KR"
-            },
-            {
-                "clientName": "ANDROID_TESTSUITE",
-                "clientVersion": "1.9",
-                "hl": "ko",
-                "gl": "KR"
-            }
+            {"clientName": "ANDROID", "clientVersion": "20.10.38", "androidSdkVersion": 34, "hl": "ko", "gl": "KR"},
+            {"clientName": "IOS", "clientVersion": "19.29.1", "deviceModel": "iPhone16,2", "hl": "ko", "gl": "KR"},
+            {"clientName": "WEB_EMBEDDED_PLAYER", "clientVersion": "1.20240401.01.00", "hl": "ko", "gl": "KR"},
+            {"clientName": "ANDROID_TESTSUITE", "clientVersion": "1.9", "hl": "ko", "gl": "KR"}
         ]
 
         url = f"https://www.youtube.com/youtubei/v1/player?key={api_key}" if api_key else "https://www.youtube.com/youtubei/v1/player"
@@ -237,72 +245,43 @@ def _fetch_innertube_captions(video_id: str, cookie_file: str | None = None) -> 
         }
 
         for client_info in clients:
-            payload = {
-                "context": {
-                    "client": client_info
-                },
-                "videoId": video_id
-            }
-
+            client_name = client_info.get('clientName', 'UNKNOWN')
             try:
+                payload = {"context": {"client": client_info}, "videoId": video_id}
                 r = session.post(url, json=payload, headers=headers, timeout=10)
-                if r.status_code == 200:
-                    data = r.json()
-                    captions = data.get("captions", {}).get("playerCaptionsTracklistRenderer", {}).get("captionTracks", [])
-                    if captions:
-                        # 1. 한국어 우선 검색
-                        target_track = None
-                        for c in captions:
-                            if "ko" in c.get("languageCode", "").lower():
-                                target_track = c
-                                break
-                        # 2. 영어 검색
-                        if not target_track:
-                            for c in captions:
-                                if "en" in c.get("languageCode", "").lower():
-                                    target_track = c
-                                    break
-                        # 3. 첫 번째 트랙 선택
-                        if not target_track:
-                            target_track = captions[0]
+                if r.status_code != 200:
+                    continue
 
-                        base_url = target_track.get("baseUrl")
-                        if base_url:
-                            full_text = None
-                            # 1. 한국어가 아닌 경우 실시간 한국어 번역(&tlang=ko) 우선 시도
-                            if "ko" not in target_track.get("languageCode", "").lower():
-                                try:
-                                    trans_url = f"{base_url}&tlang=ko"
-                                    sub_r = requests.get(trans_url, timeout=15)
-                                    if sub_r.status_code == 200 and len(sub_r.text) > 0:
-                                        root = ET.fromstring(sub_r.text)
-                                        texts = [elem.text.strip() for elem in root.iter() if elem.text and elem.text.strip()]
-                                        candidate = html.unescape(" ".join(texts)).strip()
-                                        if candidate and len(candidate) > 30:
-                                            full_text = candidate
-                                            print(f"[Transcript] 0차(Innertube {client_info.get('clientName', 'ANDROID')} API - 한글 번역) 성공! ({len(full_text)}자)")
-                                except Exception as trans_err:
-                                    print(f"[Transcript] Innertube 실시간 한글 번역 요청 실패/지연 ({trans_err}), 원문 자막으로 Fallback...")
+                data = r.json()
+                captions = data.get("captions", {}).get("playerCaptionsTracklistRenderer", {}).get("captionTracks", [])
+                target_track = _select_best_caption_track(captions)
+                if not target_track:
+                    continue
 
-                            # 2. 번역 실패 시 또는 한국어 트랙인 경우 원본 자막(raw track) 직접 다운로드
-                            if not full_text:
-                                try:
-                                    sub_r = requests.get(base_url, timeout=15)
-                                    if sub_r.status_code == 200 and len(sub_r.text) > 0:
-                                        root = ET.fromstring(sub_r.text)
-                                        texts = [elem.text.strip() for elem in root.iter() if elem.text and elem.text.strip()]
-                                        candidate = html.unescape(" ".join(texts)).strip()
-                                        if candidate and len(candidate) > 30:
-                                            full_text = candidate
-                                            lang_code = target_track.get('languageCode', 'raw')
-                                            print(f"[Transcript] 0차(Innertube {client_info.get('clientName', 'ANDROID')} API - {lang_code} 원문) 성공! ({len(full_text)}자)")
-                                except Exception as raw_err:
-                                    print(f"[Transcript] Innertube 원문 자막 다운로드 실패: {raw_err}")
+                base_url = target_track.get("baseUrl")
+                if not base_url:
+                    continue
 
-                            if full_text:
-                                return full_text
+                full_text = None
+                lang_code = target_track.get("languageCode", "").lower()
+
+                # 한국어가 아닌 경우 실시간 한국어 번역(&tlang=ko) 우선 시도
+                if "ko" not in lang_code:
+                    full_text = _download_caption_text_from_url(f"{base_url}&tlang=ko", session)
+                    if full_text:
+                        print(f"[Transcript] 0차(Innertube {client_name} API - 한글 번역) 성공! ({len(full_text)}자)")
+                        return full_text
+
+                # 번역 실패 시 또는 한국어 트랙인 경우 원본 자막 다운로드
+                full_text = _download_caption_text_from_url(base_url, session)
+                if full_text:
+                    print(f"[Transcript] 0차(Innertube {client_name} API - {lang_code or 'raw'} 원문) 성공! ({len(full_text)}자)")
+                    return full_text
+
             except Exception as client_err:
-                print(f"[Transcript] Innertube {client_info.get('clientName', 'ANDROID')} 시도 실패: {client_err}")
+                print(f"[Transcript] Innertube {client_name} 시도 실패: {client_err}")
+                continue
+
     except Exception as e:
         print(f"[Transcript] Innertube 모바일 API 전체 실패: {e}")
     return None

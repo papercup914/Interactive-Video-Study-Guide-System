@@ -1,6 +1,7 @@
 from sqlalchemy import Column, String, Integer, Text, DateTime
+from sqlalchemy.sql import func
 from backend.data.database import Base
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 
 class Job(Base):
@@ -13,7 +14,7 @@ class Job(Base):
     url = Column(String, nullable=True)
     title = Column(String, nullable=True)
     error = Column(Text, nullable=True)
-    created_at = Column(String, default=lambda: datetime.now().isoformat())
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now())
     
 class JobCheckpoint(Base):
     __tablename__ = "job_checkpoints"
@@ -21,7 +22,7 @@ class JobCheckpoint(Base):
     job_id = Column(String, primary_key=True)
     section_title = Column(String, primary_key=True)
     content = Column(Text)
-    created_at = Column(String, default=lambda: datetime.now().isoformat())
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now())
 
 class StudyGuide(Base):
     __tablename__ = "study_guides"
@@ -35,7 +36,7 @@ class StudyGuide(Base):
     learning_profile = Column(Text, nullable=True) # JSON string
     profile_message = Column(Text, nullable=True)
     generation_time_sec = Column(Integer, nullable=True)
-    created_at = Column(String, default=lambda: datetime.now().isoformat())
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now())
     length_preset = Column(String, nullable=True)
     analogy_preset = Column(String, nullable=True)
     video_duration = Column(String, nullable=True)
@@ -62,8 +63,8 @@ class BatchJob(Base):
     logs = Column(Text, nullable=True, default="[]") # JSON list of log items
     remote_url = Column(String, nullable=True)
     sync_key = Column(String, nullable=True)
-    created_at = Column(String, default=lambda: datetime.now().isoformat())
-    updated_at = Column(String, default=lambda: datetime.now().isoformat())
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), onupdate=lambda: datetime.now(timezone.utc))
 
 
 class BatchVideoItem(Base):
@@ -79,6 +80,6 @@ class BatchVideoItem(Base):
     error = Column(Text, nullable=True)
     sync_status = Column(String, default="pending") # pending, synced, failed
     presets_generated = Column(Integer, default=0)
-    created_at = Column(String, default=lambda: datetime.now().isoformat())
-    updated_at = Column(String, default=lambda: datetime.now().isoformat())
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), onupdate=lambda: datetime.now(timezone.utc))
 

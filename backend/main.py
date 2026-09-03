@@ -52,15 +52,24 @@ async def get_my_profile(current_user: dict = Depends(get_current_user)):
     """Protected endpoint to verify user authentication token."""
     return {"status": "ok", "user": current_user}
 
+import asyncio
+
 @app.on_event("startup")
-def startup_event():
-    try:
-        from backend.services.llm import clean_invalid_cached_chapters
-        cleaned = clean_invalid_cached_chapters()
-        if cleaned > 0:
-            print(f"[Startup] Purged {cleaned} invalid/non-narrative cached chapters.")
-    except Exception as e:
-        print(f"[Startup Warning] Failed cache integrity check: {e}")
+async def startup_event():
+    from backend.config import settings
+    for warn in settings.validate_keys_on_startup():
+        print(warn)
+
+    async def _bg_cache_cleanup():
+        try:
+            from backend.services.llm import clean_invalid_cached_chapters
+            cleaned = await asyncio.to_thread(clean_invalid_cached_chapters)
+            if cleaned > 0:
+                print(f"[Startup Background] Purged {cleaned} invalid/non-narrative cached chapters.")
+        except Exception as e:
+            print(f"[Startup Warning] Failed background cache integrity check: {e}")
+
+    asyncio.create_task(_bg_cache_cleanup())
 
 from backend.routers import guide, discussion, admin
 
