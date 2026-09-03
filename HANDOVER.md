@@ -112,16 +112,31 @@
   1. [`frontend/src/utils/supabase/middleware.ts`](file:///i:/Interactive%20Video%20Study%20Guide%20System/frontend/src/utils/supabase/middleware.ts): `/api/` 백엔드 프록시 라우트에 대해 미들웨어 401 차단을 해제하여 비로그인/게스트도 정상 통과되도록 패치 후 Vercel 배포 완료 (`Status: 200 OK`).
   2. [`docker-compose.yml`](file:///i:/Interactive%20Video%20Study%20Guide%20System/docker-compose.yml): `environment`에 `DATABASE_URL=sqlite:///./backend/data/jobs.db`를 최우선 순위로 명시하고, `./backend/.env:/app/backend/.env` 바인드 마운트 설정 후 `up -d --force-recreate` 실행.
   3. **검증 완료**: 9월 3일 생성된 `job_9100b11b71c44ec999653f8a37998dbf`("컨텍스트 엔지니어링이 AI 코딩 에이전트를 개선하는 방법", 5개 챕터)를 포함한 86개 전체 학습서가 Vercel 라이브 사이트에서 100% 정상 반환됨을 확인.
-- **Notion 리포트**: [📄 [Bug Report] 배포 후 학습 서재 가이드 목록 일시적 미노출 이슈](https://app.notion.com/p/Bug-Report-In-Progress-3d0a8db03fbe81619bf2d560a0641e8a) (`In Progress`)
+- **Notion 리포트**: [📄 [Bug Report] 배포 후 학습 서재 가이드 목록 일시적 미노출 이슈](https://app.notion.com/p/Bug-Report-Resolved-3d0a8db03fbe81619bf2d560a0641e8a) (`Resolved`)
+
+### 12) [버그 해결] 외국어 유튜브 영상 챕터 본문 한국어 미번역(영어 원문 출력) 이슈 해결 (In Progress)
+- **배경 및 문제점**: 영어 유튜브 영상(예: Tanmai Gopal의 PromptQL 발표)으로 가이드 생성 시, 목차는 정상 번역되었으나 상세 챕터 서술형 본문 전체가 번역되지 않고 영어 원문으로만 출력되는 현상 발생.
+- **원인 분석**:
+  1. `backend/prompts/chapter_guide.py`: 인사말 금지, 메타 텍스트 금지, 2단계 출력 구조만 최상단에 강조되고, 한국어 번역 지침은 페르소나 내부 1줄에 머물러 있어 영문 스크립트 입력 시 LLM(Nemotron 등)이 영어로 본문을 작성.
+  2. `backend/services/llm.py`: `validate_chapter_narrative` 함수가 본문 길이(1,000자)와 인사말 유무만 검증하고 한글 포함 여부를 전혀 검사하지 않아, 100% 영문으로 출력되어도 유효한 본문으로 통과되어 캐시 및 DB에 그대로 저장됨.
+- **해결 조치**:
+  1. [`backend/prompts/chapter_guide.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/prompts/chapter_guide.py): `[🚨 초강력 절대 준수 1: 100% 자연스러운 한국어 번역 및 해설 서술 (Strict Korean Output Policy)]`을 최상단에 배치하여 영문 고유명사를 제외한 모든 본문/위젯의 한국어 작성을 강제.
+  2. [`backend/services/llm.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/llm.py):
+     - `user_instruction` 서두 및 지시사항에 100% 한국어 번역 작성 명시.
+     - `validate_chapter_narrative`에 한글 글자 수(최소 150자) 검증 가드레일 탑재 (미달 시 즉시 탈락 및 한국어 번역 재시도 에스컬레이션).
+     - Fallback 합성 가드레일에서도 비한국어 본문 감지 시 한국어 기본 구조 템플릿으로 안전 Fallback 보장.
+     - `clean_invalid_cached_chapters`로 기존 비한국어 캐시 파일 2건 전수 삭제 완료.
+- **Notion 리포트**: [📄 [Bug Report] 외국어 유튜브 영상 챕터 본문 한국어 미번역 이슈](https://app.notion.com/p/Bug-Report-In-Progress-3d0a8db03fbe818da58bffbe102c94f1) (`In Progress`)
 
 ---
 
 ## 3. Notion 문서 관리 현황
 
 1. **[공식 이슈 보드] [📋 Interactive Video Study Guide System 이슈 리포트 (통합 대시보드)](https://app.notion.com/p/3cba8db03fbe80a7972be85c1b2c2202)**:
-   - 📄 [[Bug Report] 배포 후 학습 서재 가이드 목록 일시적 미노출 이슈](https://app.notion.com/p/Bug-Report-In-Progress-3d0a8db03fbe81619bf2d560a0641e8a) (`In Progress` - 86개 가이드 복구 확인, 사용자 최종 검증 대기)
-   - 📄 [[Bug Report] 가이드 생성 시작 시 ReadTimeout 및 404 발생 이슈](https://app.notion.com/p/Bug-Report-ReadTimeout-404-In-Progress-3d0a8db03fbe811ca6d4f8527e3ee3fc) (`In Progress` - Nemotron 모델 교체 및 스마트 샘플링 완료, 사용자 최종 검증 대기)
-   - 📄 [[Bug Report] 랜딩 페이지에서 가이드 클릭 시 React Error #310 발생으로 인한 페이지 로딩 실패 이슈](https://app.notion.com/p/Bug-Report-React-Error-310-In-Progress-3cda8db03fbe8170af67f0ee00c46a4e) (`In Progress`)
+   - 📄 [[Bug Report] 외국어 유튜브 영상 챕터 본문 한국어 미번역 이슈](https://app.notion.com/p/Bug-Report-In-Progress-3d0a8db03fbe818da58bffbe102c94f1) (`In Progress` - 프롬프트 전면 개편 및 한글 글자수 검증 가드레일 탑재, 사용자 재검증 대기)
+   - 📄 [[Bug Report] 배포 후 학습 서재 가이드 목록 일시적 미노출 이슈](https://app.notion.com/p/Bug-Report-Resolved-3d0a8db03fbe81619bf2d560a0641e8a) (`Resolved` - 사용자 최종 검증 완료)
+   - 📄 [[Bug Report] 가이드 생성 시작 시 ReadTimeout 및 404 발생 이슈](https://app.notion.com/p/Bug-Report-ReadTimeout-404-Resolved-3d0a8db03fbe811ca6d4f8527e3ee3fc) (`Resolved` - 사용자 최종 검증 완료)
+   - 📄 [[Bug Report] 랜딩 페이지에서 가이드 클릭 시 React Error #310 발생으로 인한 페이지 로딩 실패 이슈](https://app.notion.com/p/Bug-Report-React-Error-310-Resolved-3cda8db03fbe8170af67f0ee00c46a4e) (`Resolved` - 사용자 최종 검증 완료)
    - 📄 [[Bug Report] 대시보드와 가이드 상세 뷰어 간 9종 프리셋 표시 및 제목 불일치 이슈](https://app.notion.com/p/Bug-Report-9-Resolved-3cca8db03fbe816ab4e0d79a54a30a34) (`Resolved`)
    - 📄 [[Bug Report] 프리셋 탐색 모달 오픈 시 브라우저 GPU 과부하로 인한 타 탭 비디오 버벅임 이슈](https://app.notion.com/p/Bug-Report-GPU-Resolved-3cca8db03fbe8105ad81dfeb3323d5e5) (`Resolved`)
    - 📄 [[Bug Report] 2시간 이상 장문 유튜브 영상 가이드 생성 이슈](https://app.notion.com/p/Bug-Report-2-Resolved-3cca8db03fbe81059afada2b6b96d034) (`Resolved`)
@@ -158,9 +173,9 @@ docker compose up -d
 
 ## 5. 다음 대화에서 이어서 진행할 수 있는 과제
 
-1. **사용자 실서비스 생성 테스트 및 피드백 확인**:
-   - 메인 웹사이트([https://interactive-video-study-guide-syste.vercel.app](https://interactive-video-study-guide-syste.vercel.app))에서 새 유튜브 영상을 입력하고 `[⚡ 무료 초고속] NVIDIA Nemotron Lightning (추천)` 모델로 가이드가 3초 만에 생성되는지 최종 확인.
-   - 사용자 확인 후 Notion 이슈 페이지 2건(`ReadTimeout 이슈`, `학습 서재 미노출 이슈`)의 상태를 `Resolved`로 일괄 전환.
+1. **외국어 영상 한국어 번역 가이드 생성 실서비스 검증**:
+   - AWS EC2에 `git pull origin main && docker compose up -d` 배포 후, 영어 유튜브 영상을 입력하여 챕터 서술형 본문 전체가 유창한 한국어로 생성되는지 사용자 최종 확인.
+   - 사용자 확인 후 Notion 신규 이슈(`외국어 유튜브 영상 챕터 본문 한국어 미번역 이슈`)를 `Resolved`로 전환.
 2. **Vercel Web Analytics 대시보드 트래픽 모니터링**:
    - Vercel Analytics 활성화 후 실사용자 접속 및 페이지뷰 데이터 수집 추이 확인.
 
