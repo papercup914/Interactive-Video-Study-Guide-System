@@ -9,7 +9,7 @@ class AppSettings(BaseSettings):
     .env 파일 및 OS 환경변수로부터 로드하고 타입을 자동 검증합니다.
     """
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(".env", "backend/.env"),
         env_file_encoding="utf-8",
         extra="ignore"
     )

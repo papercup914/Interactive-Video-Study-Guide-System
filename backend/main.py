@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
 load_dotenv(override=False)
+load_dotenv("backend/.env", override=False)
 
 app = FastAPI(
     title="Interactive Video Study Guide API",
