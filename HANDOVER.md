@@ -90,19 +90,46 @@
   2. **검증**: `npm run build` (Turbopack) 100% 무결성 통과 (에러 0건).
   3. **Notion 버그 리포트 등록**: `In Progress` 상태로 이슈 등록 완료.
 
+### 10) [버그 해결] OpenRouter 404 모델 교체 및 가이드 생성 ReadTimeout 완전 해결 (In Progress)
+- **배경 및 문제점**: 가이드 생성 시작 직후 "목차 구조 설계 중..." 단계에서 `RetryError[raised ReadTimeout]` 모달 발생.
+- **원인 분석**:
+  1. OpenRouter에서 `meta-llama/llama-3.3-70b-instruct:free`가 유료 전용으로 전환되어 `:free` 슬러그 호출 시 `404 Not Found` 반환.
+  2. AWS EC2의 `backend/.env`가 로컬과 비동기화되어 만료된 구버전 `GEMINI_API_KEY`로 요청이 전달되어 무한 대기.
+  3. Dockerfile에 `psycopg2-binary` 누락으로 컨테이너 크래시 루프 발생.
+- **해결 조치**:
+  1. [`backend/services/llm.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/llm.py): 100% 정상 가동 검증된 비-중국계 최고 성능 무료 모델인 `nvidia/nemotron-3.5-lightning:free`(초고속 3초) 및 `nvidia/nemotron-3-ultra-550b-a55b:free`로 기본 매핑 및 Fallback 교체.
+  2. 목차 생성 시 10,000자 초과 자막에 대해 스마트 샘플링(앞 3,500자 + 중간 3,000자 + 끝 3,500자) 적용으로 응답 지연 원천 차단.
+  3. [`backend/requirements.txt`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/requirements.txt): `psycopg2-binary` 추가 및 EC2 최신 Docker 이미지 빌드 배포 완료 (`200 OK`).
+  4. AWS EC2 `backend/.env`에 `OPENROUTER_API_KEY` 직접 주입 완료.
+- **Notion 리포트**: [📄 [Bug Report] 가이드 생성 시작 시 ReadTimeout 및 404 발생 이슈](https://app.notion.com/p/Bug-Report-ReadTimeout-404-In-Progress-3d0a8db03fbe811ca6d4f8527e3ee3fc) (`In Progress`)
+
+### 11) [버그 해결] 배포 후 학습 서재 가이드 목록 일시적 미노출(최근 생성 학습서 실종) 이슈 완전 해결 (In Progress)
+- **배경 및 문제점**: 배포 후 새로고침 시 하단 "내 학습 서재"에 최근 생성했던 학습서("컨텍스트 엔지니어링...")가 보이지 않는 현상 발생.
+- **원인 분석**:
+  1. **Next.js 미들웨어 401 차단**: `frontend/src/utils/supabase/middleware.ts`에서 비로그인 또는 쿠키 세션 미보유 시 `/api/` 요청을 `401 Unauthorized`로 막아 프론트엔드가 서재 목록을 0개로 수신.
+  2. **도커 이미지 내부 캐시 고착**: 이전 빌드 시 이미지 내부 `/app/backend/.env`에 외부 Neon DB 설정이 복사되어 6.08MB 원본 SQLite(`jobs.db`) 대신 외부 DB를 조회.
+- **해결 조치**:
+  1. [`frontend/src/utils/supabase/middleware.ts`](file:///i:/Interactive%20Video%20Study%20Guide%20System/frontend/src/utils/supabase/middleware.ts): `/api/` 백엔드 프록시 라우트에 대해 미들웨어 401 차단을 해제하여 비로그인/게스트도 정상 통과되도록 패치 후 Vercel 배포 완료 (`Status: 200 OK`).
+  2. [`docker-compose.yml`](file:///i:/Interactive%20Video%20Study%20Guide%20System/docker-compose.yml): `environment`에 `DATABASE_URL=sqlite:///./backend/data/jobs.db`를 최우선 순위로 명시하고, `./backend/.env:/app/backend/.env` 바인드 마운트 설정 후 `up -d --force-recreate` 실행.
+  3. **검증 완료**: 9월 3일 생성된 `job_9100b11b71c44ec999653f8a37998dbf`("컨텍스트 엔지니어링이 AI 코딩 에이전트를 개선하는 방법", 5개 챕터)를 포함한 86개 전체 학습서가 Vercel 라이브 사이트에서 100% 정상 반환됨을 확인.
+- **Notion 리포트**: [📄 [Bug Report] 배포 후 학습 서재 가이드 목록 일시적 미노출 이슈](https://app.notion.com/p/Bug-Report-In-Progress-3d0a8db03fbe81619bf2d560a0641e8a) (`In Progress`)
+
 ---
 
 ## 3. Notion 문서 관리 현황
 
 1. **[공식 이슈 보드] [📋 Interactive Video Study Guide System 이슈 리포트 (통합 대시보드)](https://app.notion.com/p/3cba8db03fbe80a7972be85c1b2c2202)**:
-   - 📄 [[Bug Report] 랜딩 페이지에서 가이드 클릭 시 React Error #310 발생으로 인한 페이지 로딩 실패 이슈](https://app.notion.com/p/Bug-Report-React-Error-310-In-Progress-3cda8db03fbe8170af67f0ee00c46a4e) (`In Progress` - 사용자 검증 대기)
-   - 📄 [[Bug Report] 대시보드와 가이드 상세 뷰어 간 9종 프리셋 표시 및 제목 불일치 이슈](https://app.notion.com/p/Bug-Report-9-Resolved-3cca8db03fbe816ab4e0d79a54a30a34) (`Resolved` - 사용자 검증 완료)
-   - 📄 [[Bug Report] 프리셋 탐색 모달 오픈 시 브라우저 GPU 과부하로 인한 타 탭 비디오 버벅임 이슈](https://app.notion.com/p/Bug-Report-GPU-Resolved-3cca8db03fbe8105ad81dfeb3323d5e5) (`Resolved` - 사용자 검증 완료)
+   - 📄 [[Bug Report] 배포 후 학습 서재 가이드 목록 일시적 미노출 이슈](https://app.notion.com/p/Bug-Report-In-Progress-3d0a8db03fbe81619bf2d560a0641e8a) (`In Progress` - 86개 가이드 복구 확인, 사용자 최종 검증 대기)
+   - 📄 [[Bug Report] 가이드 생성 시작 시 ReadTimeout 및 404 발생 이슈](https://app.notion.com/p/Bug-Report-ReadTimeout-404-In-Progress-3d0a8db03fbe811ca6d4f8527e3ee3fc) (`In Progress` - Nemotron 모델 교체 및 스마트 샘플링 완료, 사용자 최종 검증 대기)
+   - 📄 [[Bug Report] 랜딩 페이지에서 가이드 클릭 시 React Error #310 발생으로 인한 페이지 로딩 실패 이슈](https://app.notion.com/p/Bug-Report-React-Error-310-In-Progress-3cda8db03fbe8170af67f0ee00c46a4e) (`In Progress`)
+   - 📄 [[Bug Report] 대시보드와 가이드 상세 뷰어 간 9종 프리셋 표시 및 제목 불일치 이슈](https://app.notion.com/p/Bug-Report-9-Resolved-3cca8db03fbe816ab4e0d79a54a30a34) (`Resolved`)
+   - 📄 [[Bug Report] 프리셋 탐색 모달 오픈 시 브라우저 GPU 과부하로 인한 타 탭 비디오 버벅임 이슈](https://app.notion.com/p/Bug-Report-GPU-Resolved-3cca8db03fbe8105ad81dfeb3323d5e5) (`Resolved`)
    - 📄 [[Bug Report] 2시간 이상 장문 유튜브 영상 가이드 생성 이슈](https://app.notion.com/p/Bug-Report-2-Resolved-3cca8db03fbe81059afada2b6b96d034) (`Resolved`)
    - 📄 [[Bug Report] Vercel 프로덕션 가이드 생성 시 유튜브 봇 감지 오디오 다운로드 실패 이슈](https://app.notion.com/p/Bug-Report-Vercel-Resolved-3cba8db03fbe81e4a59fe0d3e1301b40) (`Resolved`)
-2. **[개발/가동 가이드]**:
-   - 📄 **[🚀 [운영 가이드] 로컬 개발부터 Vercel & AWS EC2 배포 및 서버 재시작 완전 정복 매뉴얼](https://app.notion.com/p/Vercel-AWS-EC2-3cca8db03fbe8110bd96cb12c92da8cf)** (전체 아키텍처, 터미널 & SSH 명령어, 실전 트러블슈팅 및 퀵 치트시트 완비).
-   - 📄 [[프로젝트 작업 시작 및 터미널 3대 프로세스 가이드]](https://app.notion.com/p/3-3cba8db03fbe81b9aedcf37d7f5b68b5).
+
+2. **[인프라 및 가동 가이드]**:
+   - 📄 **[🌐 외부 서비스 및 인프라 접속 정보 모음](https://app.notion.com/p/3d0a8db03fbe8101a6d3ee6c637f8749)** (Vercel, AWS EC2, OpenRouter, Neon, Upstash, Supabase, GitHub 접속 정보 및 운영 팁 완비).
+   - 📄 **[🚀 [운영 가이드] 로컬 개발부터 Vercel & AWS EC2 배포 및 서버 재시작 완전 정복 매뉴얼](https://app.notion.com/p/Vercel-AWS-EC2-3cca8db03fbe8110bd96cb12c92da8cf)**.
 
 ---
 
@@ -120,29 +147,21 @@ cd "I:\Interactive Video Study Guide System\frontend"
 npm run dev
 ```
 
-### 로컬 Celery 워커 실행
-```powershell
-docker run -d --name studyguide-local-redis -p 6379:6379 redis:7-alpine
-cd "I:\Interactive Video Study Guide System"
-celery -A backend.celery_app worker --loglevel=info -P solo
-```
-
 ### AWS EC2 운영 백엔드 업데이트
 ```bash
 cd ~/Interactive-Video-Study-Guide-System
 git pull origin main
-docker compose restart fastapi
+docker compose up -d
 ```
 
 ---
 
 ## 5. 다음 대화에서 이어서 진행할 수 있는 과제
 
-1. **React Error #310 수정 및 뷰어 로딩 사용자 최종 확인 후 Notion 상태를 `Resolved`로 전환**:
-   - Notion 이슈 페이지(`3cda8db0-3fbe-8170-af67-f0ee00c46a4e`) 상태를 사용자의 피드백 확인 후 `Resolved`로 변경.
-2. **신규 생성 가이드의 도입부 인삿말 완전 배제(Strict Zero-Greeting Policy) 및 주제 요약 카드 실제 생성 품질 모니터링**:
-   - 관리자 배치 생성(`/admin/batch`) 또는 단일 영상 생성을 통해 훅 기반 첫 문장 및 주제 카드가 완벽하게 렌더링되는지 확인.
-3. **추가 유튜브 재생목록 대량 사전 생성 및 AWS 동기화**:
-   - 관리자 대시보드(`/admin/batch`)에서 추천 강의 재생목록을 일괄 생성하여 AWS 운영 DB로 푸시.
+1. **사용자 실서비스 생성 테스트 및 피드백 확인**:
+   - 메인 웹사이트([https://interactive-video-study-guide-syste.vercel.app](https://interactive-video-study-guide-syste.vercel.app))에서 새 유튜브 영상을 입력하고 `[⚡ 무료 초고속] NVIDIA Nemotron Lightning (추천)` 모델로 가이드가 3초 만에 생성되는지 최종 확인.
+   - 사용자 확인 후 Notion 이슈 페이지 2건(`ReadTimeout 이슈`, `학습 서재 미노출 이슈`)의 상태를 `Resolved`로 일괄 전환.
+2. **Vercel Web Analytics 대시보드 트래픽 모니터링**:
+   - Vercel Analytics 활성화 후 실사용자 접속 및 페이지뷰 데이터 수집 추이 확인.
 
 
