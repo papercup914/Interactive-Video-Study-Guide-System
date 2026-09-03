@@ -35,9 +35,11 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DATABASE_URL=sqlite:///./backend/data/jobs.db
       - SELECTED_GEMINI_VERSION=gemini-3.5-flash-lite
       - APP_ENV=production
     volumes:
+      - ./backend/.env:/app/backend/.env
       - ./backend/data:/app/backend/data
       - ./backend/tmp:/app/backend/tmp
       - ./data:/app/data
@@ -59,9 +61,11 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DATABASE_URL=sqlite:///./backend/data/jobs.db
       - SELECTED_GEMINI_VERSION=gemini-3.5-flash-lite
       - APP_ENV=production
     volumes:
+      - ./backend/.env:/app/backend/.env
       - ./backend/data:/app/backend/data
       - ./backend/tmp:/app/backend/tmp
       - ./data:/app/data
