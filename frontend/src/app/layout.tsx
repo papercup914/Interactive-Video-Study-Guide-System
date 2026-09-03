@@ -8,6 +8,7 @@ import { TaskWidget } from "@/components/TaskWidget";
 import { LearnerProfileWidget } from "@/components/LearnerProfileWidget";
 import { AuthStatusWidget } from "@/components/AuthStatusWidget";
 import { Providers } from "./providers";
+import { Analytics } from "@vercel/analytics/next";
 
 const inter = Inter({
   variable: "--font-geist-sans", // Keeping variable name for compatibility
@@ -60,6 +61,7 @@ export default function RootLayout({
               {children}
             </main>
             <TaskWidget />
+            <Analytics />
           </TaskProvider>
         </Providers>
       </body>
