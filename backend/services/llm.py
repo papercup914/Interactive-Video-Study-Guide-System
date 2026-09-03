@@ -762,7 +762,19 @@ async def async_generate_chapter_content(
             print(f"[Cache Read Warning] Failed reading cache file {cache_file}: {e}")
 
     chunked_context = context_data
-    
+    # 12,000자 초과 대용량 스크립트의 경우 현재 챕터 위치에 맞게 스마트 슬라이싱하여 타임아웃 방지 및 생성 집중도 극대화
+    if isinstance(context_data, str) and not context_data.startswith("GEMINI_FILE_URI::") and len(context_data) > 12000:
+        total_len = len(context_data)
+        center_ratio = (section_index + 0.5) / max(1, total_sections)
+        center_idx = int(total_len * center_ratio)
+        half_window = 4500  # 앞뒤 4,500자 (총 9,000자 윈도우)
+        start_idx = max(0, center_idx - half_window)
+        end_idx = min(total_len, center_idx + half_window)
+        prefix = "...[앞부분 내용 생략]...\n" if start_idx > 0 else ""
+        suffix = "\n...[뒷부분 내용 생략]..." if end_idx < total_len else ""
+        chunked_context = f"{prefix}{context_data[start_idx:end_idx]}{suffix}"
+        print(f"[Smart Slicing] Chapter '{section_title}' ({section_index+1}/{total_sections}): extracted {len(chunked_context)} chars (from {start_idx} to {end_idx})")
+
     if length_preset == "문서 원본 번역":
         # Document translation mode: 1:1 translation keeping markdown images intact
         system_prompt = f"""
