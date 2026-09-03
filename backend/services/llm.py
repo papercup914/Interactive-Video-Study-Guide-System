@@ -154,7 +154,7 @@ def get_openai_client(
     provider: str = None, 
     custom_api_key: Optional[str] = None, 
     custom_base_url: Optional[str] = None,
-    timeout: float = 60.0
+    timeout: float = 120.0
 ):
     """
     OpenAI 호환 API 클라이언트(Groq, OpenRouter, NVIDIA NIM, Cerebras, OpenAI, BYOK)를 생성합니다.
@@ -461,29 +461,55 @@ def generate_outline(
         elif "nvidia" in p_lower:
             target_model = "meta/llama-3.1-70b-instruct"
             
-        client = get_openai_client(target_provider, custom_api_key=custom_api_key, custom_base_url=custom_base_url)
+        client = get_openai_client(target_provider, custom_api_key=custom_api_key, custom_base_url=custom_base_url, timeout=120.0)
+        
+        # [스마트 샘플링] 목차 설계 시 과도한 자막 길이로 인한 LLM ReadTimeout 방지
+        trimmed_context = context_data
+        if len(context_data) > 10000:
+            mid_idx = len(context_data) // 2
+            trimmed_context = (
+                context_data[:3500] + 
+                "\n\n[... 중간 내용 발췌 ...]\n\n" + 
+                context_data[mid_idx-1500:mid_idx+1500] + 
+                "\n\n[... 후반부 내용 발췌 ...]\n\n" + 
+                context_data[-3500:]
+            )
         
         # 1차 시도: json_object 모드로 구조화 출력 요청
-        try:
-            response = client.chat.completions.create(
-                model=target_model,
-                messages=[
-                    {"role": "system", "content": prompt + "\n반드시 JSON 형식 ({\"sections\": [\"챕터1\", \"챕터2\", ...]})으로만 출력해줘."},
-                    {"role": "user", "content": f"다음은 영상 스크립트 내용입니다:\n\n{context_data}"}
-                ],
-                response_format={"type": "json_object"}
-            )
-            return response.choices[0].message.content
-        except Exception:
-            # 2차 시도: 일반 텍스트 모드로 fallback
-            response = client.chat.completions.create(
-                model=target_model,
-                messages=[
-                    {"role": "system", "content": prompt + "\n반드시 마크다운 코드블록 없이 순수 JSON 형식 ({\"sections\": [\"챕터1\", \"챕터2\", ...]})으로만 출력해줘."},
-                    {"role": "user", "content": f"다음은 영상 스크립트 내용입니다:\n\n{context_data}"}
-                ]
-            )
-            return response.choices[0].message.content
+        candidate_models = [target_model]
+        if "openrouter" in p_lower and target_model != "mistralai/mistral-small-24b-instruct-2501:free":
+            candidate_models.append("mistralai/mistral-small-24b-instruct-2501:free")
+        
+        last_error = None
+        for cur_model in candidate_models:
+            try:
+                response = client.chat.completions.create(
+                    model=cur_model,
+                    messages=[
+                        {"role": "system", "content": prompt + "\n반드시 JSON 형식 ({\"sections\": [\"챕터1\", \"챕터2\", ...]})으로만 출력해줘."},
+                        {"role": "user", "content": f"다음은 영상 스크립트 내용입니다:\n\n{trimmed_context}"}
+                    ],
+                    response_format={"type": "json_object"}
+                )
+                return response.choices[0].message.content
+            except Exception as e:
+                last_error = e
+                # 2차 시도: 일반 텍스트 모드로 fallback
+                try:
+                    response = client.chat.completions.create(
+                        model=cur_model,
+                        messages=[
+                            {"role": "system", "content": prompt + "\n반드시 마크다운 코드블록 없이 순수 JSON 형식 ({\"sections\": [\"챕터1\", \"챕터2\", ...]})으로만 출력해줘."},
+                            {"role": "user", "content": f"다음은 영상 스크립트 내용입니다:\n\n{trimmed_context}"}
+                        ]
+                    )
+                    return response.choices[0].message.content
+                except Exception as inner_e:
+                    last_error = inner_e
+                    print(f"[Warning] Outline generation failed on {cur_model}: {inner_e}. Trying fallback model if available...")
+                    continue
+                    
+        raise last_error
 
     if is_gemini_provider(provider):
         try:
@@ -866,15 +892,28 @@ async def async_generate_chapter_content(
         elif "nvidia" in p_lower:
             target_model = "meta/llama-3.1-70b-instruct"
             
-        client = get_openai_client(target_provider, custom_api_key=custom_api_key, custom_base_url=custom_base_url)
-        response = client.chat.completions.create(
-            model=target_model,
-            messages=[
-                {"role": "system", "content": current_system_prompt},
-                {"role": "user", "content": current_user_instruction}
-            ]
-        )
-        return response.choices[0].message.content
+        client = get_openai_client(target_provider, custom_api_key=custom_api_key, custom_base_url=custom_base_url, timeout=120.0)
+        candidate_models = [target_model]
+        if "openrouter" in p_lower and target_model != "mistralai/mistral-small-24b-instruct-2501:free":
+            candidate_models.append("mistralai/mistral-small-24b-instruct-2501:free")
+            
+        last_error = None
+        for cur_model in candidate_models:
+            try:
+                response = client.chat.completions.create(
+                    model=cur_model,
+                    messages=[
+                        {"role": "system", "content": current_system_prompt},
+                        {"role": "user", "content": current_user_instruction}
+                    ]
+                )
+                return response.choices[0].message.content
+            except Exception as e:
+                last_error = e
+                print(f"[Warning] Chapter generation failed on {cur_model}: {e}. Trying fallback model if available...")
+                continue
+                
+        raise last_error
 
     def _call_api():
         if is_gemini_provider(provider):
