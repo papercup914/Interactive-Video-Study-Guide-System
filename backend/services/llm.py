@@ -662,6 +662,11 @@ def validate_chapter_narrative(content: str, min_chars: int = 1000, min_narrativ
     # 4. 전체 길이 검증
     if len(trimmed) < min_chars:
         return False, f"출력 전체 길이가 너무 짧습니다 ({len(trimmed)} < {min_chars}자)."
+
+    # 5. 한국어 서술 검증 (외국어 미번역 방지)
+    korean_chars = len(re.findall(r'[가-힣]', trimmed))
+    if korean_chars < 150:
+        return False, f"한국어로 번역되지 않았거나 한글 서술이 절대적으로 부족합니다 (한글 글자 수: {korean_chars}자 < 150자)."
             
     return True, "유효한 서술형 본문 및 2단계 구조입니다."
 
@@ -813,14 +818,16 @@ async def async_generate_chapter_content(
         )
 
         user_instruction = (
+            f"[🚨 최우선 필수 지침: 100% 자연스러운 한국어로 번역 및 해설 서술 (Strict Korean Policy)]\n"
+            f"원본 영상 스크립트가 영어, 일본어 등 외국어이더라도, 출력되는 모든 마크다운 서술형 본문과 인터랙티브 태그 내용은 100% 자연스럽고 유창한 한국어로 번역 및 풀어서 작성하십시오. 필수 기술 용어(Docker, API, PromptQL 등)를 제외하고 영문 문장을 출력하면 시스템 검증에서 즉시 탈락(Reject)됩니다.\n\n"
             f"다음은 분석할 원본 영상 전체 스크립트입니다:\n\n{chunked_context}\n\n"
             f"=======================================================\n"
             f"[작성 지시: 챕터 '{section_title}']\n"
-            f"위 스크립트를 분석하여 '{section_title}'에 대한 마크다운 서술형 학습 본문을 먼저 풍부하게 작성({target_min_chars}자 이상)하고, 맨 마지막에 인터랙티브 학습 장치 태그 1개를 부착하세요.\n"
+            f"위 스크립트를 분석하여 '{section_title}'에 대한 마크다운 서술형 학습 본문을 100% 자연스러운 한국어로 먼저 풍부하게 작성({target_min_chars}자 이상)하고, 맨 마지막에 인터랙티브 학습 장치 태그 1개를 부착하세요.\n"
+            f"- [100% 한국어 서술]: 본문의 모든 설명, 비유, 인사이트, 팁은 100% 자연스러운 한국어로 번역 및 작성하십시오.\n"
             f"- [도입부 인삿말/자기소개 완전 금지]: '안녕하세요', '여러분의 튜터입니다' 등 의례적인 인사말/자기소개를 절대 쓰지 말고, 챕터의 핵심 질문(Why/What) 또는 흥미로운 실무 배경 한 줄로 곧바로 시작하십시오.\n"
             f"- [메타 텍스트 금지]: '[파트 1...]', '[파트 2...]' 같은 안내용 텍스트를 절대 출력하지 마십시오.\n"
-            f"- 원본 언어가 외국어(영어 등)라도 모든 내용은 100% 자연스러운 한국어로 번역 및 해설하여 작성하십시오.\n"
-            f"- 절대로 XML 태그나 JSON으로 바로 시작하지 마십시오. 반드시 마크다운 대제목과 핵심 문제 제기 본문부터 시작하십시오!"
+            f"- 절대로 XML 태그나 JSON으로 바로 시작하지 마십시오. 반드시 마크다운 대제목(## {section_title})과 핵심 문제 제기 본문부터 시작하십시오!"
         )
     
     loop = asyncio.get_event_loop()
@@ -966,11 +973,20 @@ async def async_generate_chapter_content(
                 
             print(f"[Narrative Validation Warning] Chapter '{section_title}' failed validation (attempt {attempt+1}/{max_validation_attempts}): {reason}. Retrying with reinforced narrative directive...")
             
+            korean_extra = ""
+            if "한국어" in reason:
+                korean_extra = (
+                    "🚨 [경고: 외국어 미번역 감지!] 이전 출력이 한국어가 아닌 외국어(영어 등)로 작성되었습니다.\n"
+                    "지금 즉시 본문의 모든 설명과 문장을 100% 유창하고 자연스러운 한국어로 번역 및 해설하여 작성하십시오!\n"
+                    "고유 기술 명칭(예: Docker, API, PromptQL 등) 외에 영문 문장이 단 하나라도 포함되어서는 안 됩니다!\n"
+                )
+            
             escalation = (
-                f"\n\n[🚨 치명적 오류 수정 지시: 2단계 엄격 출력 구조 위반 ({reason})]\n"
-                f"이전 출력에서 서술형 학습 본문이 누락되거나 분량이 부족했거나, 인사말/메타텍스트가 포함되었습니다.\n"
+                f"\n\n[🚨 치명적 오류 수정 지시: 지침 위반 ({reason})]\n"
+                f"{korean_extra}"
+                f"이전 출력에서 서술형 학습 본문이 누락되거나 분량이 부족했거나, 인사말/메타텍스트가 포함되었거나, 한국어로 번역되지 않았습니다.\n"
                 f"절대로 인사말(안녕하세요, 반갑습니다, 여러분의 튜터입니다 등)이나 메타 태그([파트 1...])를 출력하지 마십시오!\n"
-                f"반드시 마크다운 대제목(## {section_title})으로 시작하여, 최소 {target_min_chars}자 이상의 깊이 있는 한국어 서술형 본문(도입 훅, 상세 원리 및 비유, 핵심 인사이트 박스, 실무 팁)을 먼저 완벽히 작성한 뒤, 맨 마지막에만 1개의 인터랙티브 태그를 부착하십시오!\n"
+                f"반드시 마크다운 대제목(## {section_title})으로 시작하여, 최소 {target_min_chars}자 이상의 깊이 있는 100% 한국어 서술형 본문(도입 훅, 상세 원리 및 비유, 핵심 인사이트 박스, 실무 팁)을 먼저 완벽히 작성한 뒤, 맨 마지막에만 1개의 인터랙티브 태그를 부착하십시오!\n"
                 f"절대로 XML 태그로 바로 시작하거나 본문 없이 태그만 출력하지 마십시오!\n"
             )
             current_system_prompt = escalation + base_system_prompt
@@ -981,10 +997,12 @@ async def async_generate_chapter_content(
             except Exception as retry_err:
                 print(f"[Narrative Retry Error] Retry attempt {attempt+1} failed: {retry_err}")
 
-    # Fallback 합성 가드레일: 재시도 후에도 태그로 시작하거나 순수 데이터 블록인 경우 서술형 본문 구조 강제 보정
+    # Fallback 합성 가드레일: 재시도 후에도 태그로 시작하거나 순수 데이터 블록이거나 한국어 번역이 누락된 경우 서술형 본문 구조 강제 보정
     if length_preset != "문서 원본 번역":
         trimmed_res = result.strip() if result else ""
-        if FORBIDDEN_START_PATTERN.match(trimmed_res) or trimmed_res.startswith(("{", "[")):
+        korean_chars_final = len(re.findall(r'[가-힣]', trimmed_res))
+        is_non_korean = korean_chars_final < 150
+        if FORBIDDEN_START_PATTERN.match(trimmed_res) or trimmed_res.startswith(("{", "[")) or is_non_korean:
             tag_match = INTERACTIVE_TAG_PATTERN.search(trimmed_res)
             tag_block = ""
             if tag_match:
@@ -999,8 +1017,10 @@ async def async_generate_chapter_content(
                         tag_block += f"\n{end_tag}"
             elif trimmed_res.startswith(("{", "[")):
                 tag_block = f"<feynman>\n{trimmed_res}\n</feynman>"
-            else:
+            elif not is_non_korean:
                 tag_block = trimmed_res
+            else:
+                tag_block = ""
 
             result = (
                 f"## {section_title}\n\n"
