@@ -450,16 +450,16 @@ def generate_outline(
             target_model = "llama-3.3-70b-versatile"
         elif "openrouter" in p_lower:
             target_model = target_provider.replace("openrouter/", "") if "/" in target_provider else target_provider
-            if target_model in ("openrouter", "openrouter/free"):
-                target_model = "meta-llama/llama-3.3-70b-instruct:free"
+            if target_model in ("openrouter", "openrouter/free", "meta-llama/llama-3.3-70b-instruct:free"):
+                target_model = "nvidia/nemotron-3.5-lightning:free"
         elif target_provider == "OpenAI (GPT-4o)":
             target_model = "gpt-4o"
         elif target_provider == "cerebras/gpt-oss-120b":
             target_model = "gpt-oss-120b"
         elif "nemotron" in p_lower:
-            target_model = "nvidia/nemotron-3-ultra-550b-a55b"
+            target_model = "nvidia/nemotron-3.5-lightning:free"
         elif "nvidia" in p_lower:
-            target_model = "meta/llama-3.1-70b-instruct"
+            target_model = "nvidia/nemotron-3.5-lightning:free"
             
         client = get_openai_client(target_provider, custom_api_key=custom_api_key, custom_base_url=custom_base_url, timeout=120.0)
         
@@ -477,8 +477,10 @@ def generate_outline(
         
         # 1차 시도: json_object 모드로 구조화 출력 요청
         candidate_models = [target_model]
-        if "openrouter" in p_lower and target_model != "mistralai/mistral-small-24b-instruct-2501:free":
-            candidate_models.append("mistralai/mistral-small-24b-instruct-2501:free")
+        if "openrouter" in p_lower:
+            for fallback_m in ("nvidia/nemotron-3.5-lightning:free", "nvidia/nemotron-3-ultra-550b-a55b:free", "nvidia/nemotron-3-super-120b-a12b:free"):
+                if fallback_m not in candidate_models:
+                    candidate_models.append(fallback_m)
         
         last_error = None
         for cur_model in candidate_models:
@@ -881,21 +883,23 @@ async def async_generate_chapter_content(
             target_model = "llama-3.3-70b-versatile"
         elif "openrouter" in p_lower:
             target_model = target_provider.replace("openrouter/", "") if "/" in target_provider else target_provider
-            if target_model in ("openrouter", "openrouter/free"):
-                target_model = "meta-llama/llama-3.3-70b-instruct:free"
+            if target_model in ("openrouter", "openrouter/free", "meta-llama/llama-3.3-70b-instruct:free"):
+                target_model = "nvidia/nemotron-3.5-lightning:free"
         elif target_provider == "OpenAI (GPT-4o)":
             target_model = "gpt-4o"
         elif target_provider == "cerebras/gpt-oss-120b":
             target_model = "gpt-oss-120b"
         elif "nemotron" in p_lower:
-            target_model = "nvidia/nemotron-3-ultra-550b-a55b"
+            target_model = "nvidia/nemotron-3.5-lightning:free"
         elif "nvidia" in p_lower:
-            target_model = "meta/llama-3.1-70b-instruct"
+            target_model = "nvidia/nemotron-3.5-lightning:free"
             
         client = get_openai_client(target_provider, custom_api_key=custom_api_key, custom_base_url=custom_base_url, timeout=120.0)
         candidate_models = [target_model]
-        if "openrouter" in p_lower and target_model != "mistralai/mistral-small-24b-instruct-2501:free":
-            candidate_models.append("mistralai/mistral-small-24b-instruct-2501:free")
+        if "openrouter" in p_lower:
+            for fallback_m in ("nvidia/nemotron-3.5-lightning:free", "nvidia/nemotron-3-ultra-550b-a55b:free", "nvidia/nemotron-3-super-120b-a12b:free"):
+                if fallback_m not in candidate_models:
+                    candidate_models.append(fallback_m)
             
         last_error = None
         for cur_model in candidate_models:
