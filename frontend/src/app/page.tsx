@@ -402,7 +402,7 @@ function GroupedGuideCard({
 export default function Home() {
   const router = useRouter();
   const [url, setUrl] = useState("");
-  const [provider, setProvider] = useState("groq/llama-3.3-70b-versatile");
+  const [provider, setProvider] = useState("openrouter/meta-llama/llama-3.3-70b-instruct:free");
   const [lengthPreset, setLengthPreset] = useState("Auto");
   const [analogyPreset, setAnalogyPreset] = useState("Auto");
   const [pdfParsingMethod, setPdfParsingMethod] = useState("option_b");
@@ -662,13 +662,10 @@ export default function Home() {
                       value={provider}
                       onChange={(e) => setProvider(e.target.value)}
                     >
-                      <option value="groq/llama-3.3-70b-versatile">⚡ [무료 고속] Groq (Llama-3.3 70B)</option>
-                      <option value="openrouter/free">🌐 [무료] OpenRouter Free (Llama-3.3 / DeepSeek)</option>
-                      <option value="google/gemini-3.6-flash">Google Gemini 3.6 Flash</option>
-                      <option value="OpenAI (GPT-4o)">OpenAI (GPT-4o)</option>
-                      <option value="cerebras/gpt-oss-120b">Cerebras (Llama3)</option>
-                      <option value="glm-5.2">Zhipu GLM-5.2</option>
-                      <option value="nvidia/nemotron-3-ultra-550b-a55b">Nvidia Nemotron-3 Ultra 550B</option>
+                      <option value="openrouter/meta-llama/llama-3.3-70b-instruct:free">🌐 [무료] Meta Llama 3.3 70B (추천)</option>
+                      <option value="openrouter/mistralai/mistral-small-24b-instruct-2501:free">⚡ [무료] Mistral 24B (프랑스 고속)</option>
+                      <option value="openrouter/google/gemma-2-9b-it:free">💎 [무료] Google Gemma 2 9B</option>
+                      <option value="OpenAI (GPT-4o)">🔑 [개인키 전용] OpenAI (GPT-4o)</option>
                     </select>
                     <button
                       type="button"
