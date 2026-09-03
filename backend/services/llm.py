@@ -3,6 +3,7 @@ import json
 import asyncio
 import time
 import math
+from concurrent.futures import ThreadPoolExecutor
 from google import genai
 from google.genai import types
 from typing import List, Any, Optional
@@ -11,6 +12,10 @@ from pydantic import BaseModel, Field
 
 import re
 from backend.prompts.chapter_guide import build_chapter_system_prompt
+
+# LLM 비동기 작업을 위한 전용 Bounded ThreadPool (무제한 스레드 생성 DoS 방지)
+_MAX_LLM_WORKERS = max(4, int(os.getenv("CHAPTER_GENERATION_CONCURRENCY", "3")) * 2)
+_llm_executor = ThreadPoolExecutor(max_workers=_MAX_LLM_WORKERS, thread_name_prefix="llm_bounded_worker")
 
 def _should_retry_error(exception: BaseException) -> bool:
     """인증 오류, 결제/크레딧 부족(402), 404(모델 없음), 설정 누락은 재시도하지 않고 즉시 Fallback으로 넘깁니다."""
@@ -86,11 +91,12 @@ def safe_gemini_generate_content(client, model: str, contents: Any, config: Any 
     if last_err:
         raise last_err
 
-def get_gemini_client():
-    api_key = os.getenv("GEMINI_API_KEY")
+def get_gemini_client(custom_api_key: Optional[str] = None):
+    api_key = custom_api_key or os.getenv("GEMINI_API_KEY")
     if not api_key or api_key == "여기에_GEMINI_API_키를_입력하세요":
         raise ValueError("GEMINI_API_KEY 환경 변수가 설정되지 않았습니다.")
-    return genai.Client(api_key=api_key)
+    # http_options에 60초 타임아웃을 지정하여 무한 대기 DoS 방지
+    return genai.Client(api_key=api_key, http_options={"timeout": 60})
 
 _gemini_cache_map = {}
 
@@ -134,43 +140,72 @@ def is_gemini_provider(provider: str = None) -> bool:
     """
     주어진 provider 문자열이 Gemini 계열인지 확인합니다.
     """
+    p = str(provider).lower().strip() if provider else ""
+    if any(k in p for k in ("groq", "openrouter", "openai", "cerebras", "glm", "nvidia", "byok", "gpt")):
+        return False
     if not provider:
+        # GEMINI_API_KEY가 없는데 GROQ나 OPENROUTER 키가 있으면 대체 무료 모델 우선 사용
+        if not os.getenv("GEMINI_API_KEY") and (os.getenv("GROQ_API_KEY") or os.getenv("OPENROUTER_API_KEY")):
+            return False
         return True
-    p = str(provider).lower().strip()
     return "gemini" in p or "google" in p or p == "default"
 
-def get_openai_client(provider: str = None):
-    api_key = None
-    base_url = os.getenv("OPENAI_BASE_URL")
+def get_openai_client(
+    provider: str = None, 
+    custom_api_key: Optional[str] = None, 
+    custom_base_url: Optional[str] = None,
+    timeout: float = 60.0
+):
+    """
+    OpenAI 호환 API 클라이언트(Groq, OpenRouter, NVIDIA NIM, Cerebras, OpenAI, BYOK)를 생성합니다.
+    """
+    api_key = custom_api_key
+    base_url = custom_base_url or os.getenv("OPENAI_BASE_URL")
+    p_lower = str(provider).lower() if provider else ""
     
-    if provider == "cerebras/gpt-oss-120b":
-        api_key = os.getenv("CEREBRAS_API_KEY")
-        if not api_key:
-            raise ValueError("CEREBRAS_API_KEY 환경 변수가 설정되지 않았습니다. .env 파일을 확인해주세요.")
-        # Cerebras API is OpenAI compatible, so we can use the OpenAI client by pointing to their endpoint
-        base_url = "https://api.cerebras.ai/v1"
-    elif provider == "glm-5.2":
-        api_key = os.getenv("GLM_API_KEY", api_key)
-    elif provider == "nvidia/nemotron-3-ultra-550b-a55b":
-        api_key = os.getenv("NEMOTRON_3_ULTRA_API_KEY")
-    elif os.getenv("OPENAI_API_KEY") and os.getenv("OPENAI_API_KEY") != "여기에_OPENAI_API_키를_입력하세요":
-        api_key = os.getenv("OPENAI_API_KEY")
-    else:
-        # 새로 추가된 NVIDIA 모델들을 위해 GLM_API_KEY나 NEMOTRON_3_ULTRA_API_KEY를 공용으로 사용
-        nv_key = os.getenv("NEMOTRON_3_ULTRA_API_KEY") or os.getenv("GLM_API_KEY")
-        if nv_key and nv_key.startswith("nvapi-"):
-            api_key = nv_key
+    if not api_key:
+        if "groq" in p_lower:
+            api_key = os.getenv("GROQ_API_KEY")
+            base_url = base_url or "https://api.groq.com/openai/v1"
+        elif "openrouter" in p_lower:
+            api_key = os.getenv("OPENROUTER_API_KEY")
+            base_url = base_url or "https://openrouter.ai/api/v1"
+        elif provider == "cerebras/gpt-oss-120b":
+            api_key = os.getenv("CEREBRAS_API_KEY")
+            base_url = base_url or "https://api.cerebras.ai/v1"
+        elif provider == "glm-5.2":
+            api_key = os.getenv("GLM_API_KEY")
+        elif "nemotron" in p_lower or "nvidia" in p_lower:
+            api_key = os.getenv("NEMOTRON_3_ULTRA_API_KEY") or os.getenv("GLM_API_KEY")
+            base_url = base_url or "https://integrate.api.nvidia.com/v1"
+        elif os.getenv("OPENAI_API_KEY") and os.getenv("OPENAI_API_KEY") != "여기에_OPENAI_API_키를_입력하세요":
+            api_key = os.getenv("OPENAI_API_KEY")
+        else:
+            # 기본 대체 제공자 우선순위 (Groq -> OpenRouter -> NVIDIA)
+            if os.getenv("GROQ_API_KEY"):
+                api_key = os.getenv("GROQ_API_KEY")
+                base_url = base_url or "https://api.groq.com/openai/v1"
+            elif os.getenv("OPENROUTER_API_KEY"):
+                api_key = os.getenv("OPENROUTER_API_KEY")
+                base_url = base_url or "https://openrouter.ai/api/v1"
+            elif os.getenv("NEMOTRON_3_ULTRA_API_KEY"):
+                api_key = os.getenv("NEMOTRON_3_ULTRA_API_KEY")
+                base_url = base_url or "https://integrate.api.nvidia.com/v1"
             
     if not api_key:
-        raise ValueError(f"{provider if provider else 'OpenAI'} 모델을 위한 API_KEY 환경 변수가 설정되지 않았습니다. .env 파일을 확인해주세요.")
+        raise ValueError(f"{provider if provider else 'AI'} 모델을 위한 API 키가 설정되지 않았습니다. 개인 API Key를 입력하거나 .env 설정을 확인해주세요.")
     
-    # API 키가 NVIDIA 형식(nvapi-)인 경우 기본 Base URL 설정
+    # 키 접두사 기반 자동 Base URL 보정
     if not base_url and api_key.startswith("nvapi-"):
         base_url = "https://integrate.api.nvidia.com/v1"
+    elif not base_url and api_key.startswith("gsk_"):
+        base_url = "https://api.groq.com/openai/v1"
+    elif not base_url and api_key.startswith("sk-or-"):
+        base_url = "https://openrouter.ai/api/v1"
         
     try:
         import openai
-        return openai.Client(api_key=api_key, base_url=base_url)
+        return openai.Client(api_key=api_key, base_url=base_url, timeout=timeout)
     except ImportError:
         raise ImportError("openai 패키지가 설치되지 않았습니다. pip install openai 를 실행하세요.")
 
@@ -303,7 +338,16 @@ def process_audio(audio_path: str, provider: str, url_hash: Optional[str] = None
     return transcript
 
 
-def generate_outline(context_data: str, provider: str, url_hash: str, length_preset: str = "아주 상세하게", force_refresh: bool = False, video_chapters: list = None) -> List[str]:
+def generate_outline(
+    context_data: str, 
+    provider: str, 
+    url_hash: str, 
+    length_preset: str = "아주 상세하게", 
+    force_refresh: bool = False, 
+    video_chapters: list = None,
+    custom_api_key: Optional[str] = None,
+    custom_base_url: Optional[str] = None
+) -> List[str]:
     """
     오디오 컨텍스트를 분석하여 상세 목차를 생성하고 로컬에 캐시합니다.
     """
@@ -327,18 +371,11 @@ def generate_outline(context_data: str, provider: str, url_hash: str, length_pre
 
     sections = []
     
-    # If this is from a document (PDF/Web), do NOT generate an artificial outline.
-    # Just parse the existing Markdown headers, or return a single section.
-    # We can detect this if url_hash corresponds to a document (length_preset could be '문서 원본 번역')
-    # Or we can just add a parameter `is_document=False`. For now let's check `length_preset`.
     if length_preset == "문서 원본 번역":
-        # 만약 원본 텍스트 길이가 충분히 짧다면 분할하지 않고 한 번에 번역 (API 호출 횟수 최적화 및 속도 향상)
-        # Jina AI 파싱 시 UI 요소 등으로 인해 텍스트 길이가 길게(3~4만 자) 측정될 수 있으므로 임계값을 50,000자로 상향
         if len(context_data) < 50000:
             return ["전체 문서"]
             
         for line in context_data.split("\n"):
-            # 너무 잘게 쪼개져 수십 개의 챕터가 생성되는 것을 방지하기 위해 #, ## 레벨까지만 목차로 추출
             if line.startswith("# ") or line.startswith("## "):
                 clean_header = line.lstrip("# ").strip()
                 if clean_header and clean_header not in sections:
@@ -366,7 +403,6 @@ def generate_outline(context_data: str, provider: str, url_hash: str, length_pre
         공식 챕터 제목:
         {chapter_text}
         """
-        # 토큰을 절약하면서도 고유명사/전문용어의 번역 맥락을 보장하기 위해 스크립트 서두 발췌본(최대 2,500자)을 컨텍스트로 제공
         script_snippet = context_data[:2500].strip() if context_data else ""
         context_data = f"[영상 배경 및 내용 요약 발췌]\n{script_snippet}" if script_snippet else "영상 컨텍스트"
     else:
@@ -385,7 +421,7 @@ def generate_outline(context_data: str, provider: str, url_hash: str, length_pre
 
     @retry(retry=retry_if_exception(_should_retry_error), stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=30))
     def _call_gemini_outline():
-        client = get_gemini_client()
+        client = get_gemini_client(custom_api_key=custom_api_key)
         config = types.GenerateContentConfig(
             response_mime_type="application/json",
             response_schema=OutlineSchema,
@@ -408,28 +444,46 @@ def generate_outline(context_data: str, provider: str, url_hash: str, length_pre
 
     @retry(retry=retry_if_exception(_should_retry_error), stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=30))
     def _call_openai_outline(target_provider="OpenAI (GPT-4o)"):
-        target_model = target_provider
-        if target_provider == "OpenAI (GPT-4o)":
+        target_model = target_provider or "OpenAI (GPT-4o)"
+        p_lower = str(target_provider).lower()
+        if "groq" in p_lower:
+            target_model = "llama-3.3-70b-versatile"
+        elif "openrouter" in p_lower:
+            target_model = target_provider.replace("openrouter/", "") if "/" in target_provider else target_provider
+            if target_model in ("openrouter", "openrouter/free"):
+                target_model = "meta-llama/llama-3.3-70b-instruct:free"
+        elif target_provider == "OpenAI (GPT-4o)":
             target_model = "gpt-4o"
         elif target_provider == "cerebras/gpt-oss-120b":
             target_model = "gpt-oss-120b"
+        elif "nemotron" in p_lower:
+            target_model = "nvidia/nemotron-3-ultra-550b-a55b"
+        elif "nvidia" in p_lower:
+            target_model = "meta/llama-3.1-70b-instruct"
             
-        client = get_openai_client(target_provider)
-        response = client.chat.completions.create(
-            model=target_model,
-            messages=[
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": f"다음은 영상 스크립트 내용입니다:\n\n{context_data}"}
-            ],
-            response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "outline_schema",
-                    "schema": OutlineSchema.model_json_schema()
-                }
-            }
-        )
-        return response.choices[0].message.content
+        client = get_openai_client(target_provider, custom_api_key=custom_api_key, custom_base_url=custom_base_url)
+        
+        # 1차 시도: json_object 모드로 구조화 출력 요청
+        try:
+            response = client.chat.completions.create(
+                model=target_model,
+                messages=[
+                    {"role": "system", "content": prompt + "\n반드시 JSON 형식 ({\"sections\": [\"챕터1\", \"챕터2\", ...]})으로만 출력해줘."},
+                    {"role": "user", "content": f"다음은 영상 스크립트 내용입니다:\n\n{context_data}"}
+                ],
+                response_format={"type": "json_object"}
+            )
+            return response.choices[0].message.content
+        except Exception:
+            # 2차 시도: 일반 텍스트 모드로 fallback
+            response = client.chat.completions.create(
+                model=target_model,
+                messages=[
+                    {"role": "system", "content": prompt + "\n반드시 마크다운 코드블록 없이 순수 JSON 형식 ({\"sections\": [\"챕터1\", \"챕터2\", ...]})으로만 출력해줘."},
+                    {"role": "user", "content": f"다음은 영상 스크립트 내용입니다:\n\n{context_data}"}
+                ]
+            )
+            return response.choices[0].message.content
 
     if is_gemini_provider(provider):
         try:
@@ -437,7 +491,7 @@ def generate_outline(context_data: str, provider: str, url_hash: str, length_pre
         except Exception as e:
             print(f"[Harness Fallback] Gemini failed outline generation: {e}. Switching to Fallback.")
             try:
-                outline_raw = _call_openai_outline("OpenAI (GPT-4o)")
+                outline_raw = _call_openai_outline(provider or "OpenAI (GPT-4o)")
             except Exception as e2:
                 print(f"[Harness Error] Both Gemini and OpenAI outline failed: {e2}")
                 outline_raw = "{}"
@@ -618,7 +672,21 @@ def clean_invalid_cached_chapters(data_dir: Optional[str] = None) -> int:
                 
     return removed_count
 
-async def async_generate_chapter_content(section_title: str, context_data: str, provider: str, chunk_index: int, total_chunks: int, length_preset: str = "아주 상세하게", analogy_preset: str = "풍부한 비유", learner_profile: str = "", url_hash: str = "", tutor_persona: dict = None, force_refresh: bool = False) -> str:
+async def async_generate_chapter_content(
+    section_title: str, 
+    context_data: str, 
+    provider: str, 
+    chunk_index: int, 
+    total_chunks: int, 
+    length_preset: str = "아주 상세하게", 
+    analogy_preset: str = "풍부한 비유", 
+    learner_profile: str = "", 
+    url_hash: str = "", 
+    tutor_persona: dict = None, 
+    force_refresh: bool = False,
+    custom_api_key: Optional[str] = None,
+    custom_base_url: Optional[str] = None
+) -> str:
     """
     전체 스크립트를 LLM에 전달하여 챕터 내용에 해당하는 부분을 스스로 찾아서 작성하도록 합니다. (정확도 우선)
     [파트 1: 상세 서술형 학습 본문] + [파트 2: 인터랙티브 학습 장치]의 2단계 엄격 출력 구조를 강제합니다.
@@ -737,7 +805,7 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
     
     @retry(retry=retry_if_exception(_should_retry_error), stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=30))
     def _call_gemini_with_retry():
-        client = get_gemini_client()
+        client = get_gemini_client(custom_api_key=custom_api_key)
         if chunked_context.startswith("GEMINI_FILE_URI::"):
             file_name = chunked_context.split("::")[1]
             model_id = os.getenv("SELECTED_GEMINI_VERSION", "gemini-3.5-flash-lite")
@@ -781,13 +849,24 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
 
     @retry(retry=retry_if_exception(_should_retry_error), stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=30))
     def _call_openai_with_retry(target_provider="OpenAI (GPT-4o)"):
-        target_model = target_provider
-        if target_provider == "OpenAI (GPT-4o)":
+        target_model = target_provider or "OpenAI (GPT-4o)"
+        p_lower = str(target_provider).lower()
+        if "groq" in p_lower:
+            target_model = "llama-3.3-70b-versatile"
+        elif "openrouter" in p_lower:
+            target_model = target_provider.replace("openrouter/", "") if "/" in target_provider else target_provider
+            if target_model in ("openrouter", "openrouter/free"):
+                target_model = "meta-llama/llama-3.3-70b-instruct:free"
+        elif target_provider == "OpenAI (GPT-4o)":
             target_model = "gpt-4o"
         elif target_provider == "cerebras/gpt-oss-120b":
             target_model = "gpt-oss-120b"
+        elif "nemotron" in p_lower:
+            target_model = "nvidia/nemotron-3-ultra-550b-a55b"
+        elif "nvidia" in p_lower:
+            target_model = "meta/llama-3.1-70b-instruct"
             
-        client = get_openai_client(target_provider)
+        client = get_openai_client(target_provider, custom_api_key=custom_api_key, custom_base_url=custom_base_url)
         response = client.chat.completions.create(
             model=target_model,
             messages=[
@@ -815,7 +894,13 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
                 print(f"[Harness Fallback] OpenAI failed after retries: {e}. Switching to Fallback model (Gemini).")
                 return _call_gemini_with_retry()
 
-    result = await loop.run_in_executor(None, _call_api)
+    try:
+        # Bounded executor 및 120초 제한으로 무한 대기 / DoS 방어
+        result = await asyncio.wait_for(loop.run_in_executor(_llm_executor, _call_api), timeout=120.0)
+    except asyncio.TimeoutError:
+        print(f"[LLM Timeout Warning] Chapter '{section_title}' timed out after 120s. Retrying once...")
+        result = await asyncio.wait_for(loop.run_in_executor(_llm_executor, _call_api), timeout=120.0)
+
     result = sanitize_chapter_narrative(result, section_title)
     
     # 검증 및 자동 재시도 루프 (최대 3회)
@@ -848,7 +933,7 @@ async def async_generate_chapter_content(section_title: str, context_data: str, 
             current_system_prompt = escalation + base_system_prompt
             current_user_instruction = escalation + base_user_instruction
             try:
-                raw_retry = await loop.run_in_executor(None, _call_api)
+                raw_retry = await asyncio.wait_for(loop.run_in_executor(_llm_executor, _call_api), timeout=120.0)
                 result = sanitize_chapter_narrative(raw_retry, section_title)
             except Exception as retry_err:
                 print(f"[Narrative Retry Error] Retry attempt {attempt+1} failed: {retry_err}")

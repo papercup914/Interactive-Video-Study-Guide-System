@@ -28,6 +28,7 @@ class StudyGuide(Base):
     __tablename__ = "study_guides"
     
     id = Column(String, primary_key=True, index=True)
+    video_id = Column(String, index=True, nullable=True)
     url = Column(String)
     title = Column(String)
     image_url = Column(String, nullable=True)

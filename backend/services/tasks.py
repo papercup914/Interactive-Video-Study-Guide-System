@@ -27,6 +27,8 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
         learner_profile = request_data.get("learner_profile", "")
         pdf_parsing_method = request_data.get("pdf_parsing_method", "basic")
         force_refresh = request_data.get("force_refresh", False)
+        custom_api_key = request_data.get("custom_api_key") or None
+        custom_base_url = request_data.get("custom_base_url") or None
         
         is_document = False
         raw_title = ""
@@ -158,7 +160,18 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
                 print(f"Failed to upload transcript for Context Caching: {e}")
             
         update_job_status(job_id, "generating_outline", "목차 구조 설계 중...")
-        sections = await loop.run_in_executor(None, generate_outline, master_summary, provider, url_hash, length_preset, force_refresh, video_chapters)
+        sections = await loop.run_in_executor(
+            None, 
+            generate_outline, 
+            master_summary, 
+            provider, 
+            url_hash, 
+            length_preset, 
+            force_refresh, 
+            video_chapters,
+            custom_api_key,
+            custom_base_url
+        )
         
         document = {}
         total_sections = len(sections)
@@ -200,7 +213,9 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
                 content = await async_generate_chapter_content(
                     section_title, master_summary, provider, idx, total_sections, 
                     length_preset, analogy_preset, learner_profile, url_hash,
-                    tutor_persona, force_refresh
+                    tutor_persona, force_refresh,
+                    custom_api_key=custom_api_key,
+                    custom_base_url=custom_base_url
                 )
                 if content and content.strip():
                     document[section_title] = content

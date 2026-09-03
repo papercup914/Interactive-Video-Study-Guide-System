@@ -23,6 +23,8 @@ class AppSettings(BaseSettings):
     selected_gemini_version: str = Field(default="gemini-3.5-flash-lite", alias="SELECTED_GEMINI_VERSION")
     openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
     openai_base_url: Optional[str] = Field(default=None, alias="OPENAI_BASE_URL")
+    groq_api_key: Optional[str] = Field(default=None, alias="GROQ_API_KEY")
+    openrouter_api_key: Optional[str] = Field(default=None, alias="OPENROUTER_API_KEY")
     cerebras_api_key: Optional[str] = Field(default=None, alias="CEREBRAS_API_KEY")
     glm_api_key: Optional[str] = Field(default=None, alias="GLM_API_KEY")
     nemotron_3_ultra_api_key: Optional[str] = Field(default=None, alias="NEMOTRON_3_ULTRA_API_KEY")
@@ -56,10 +58,21 @@ class AppSettings(BaseSettings):
         return self.celery_result_backend or self.redis_url or "redis://localhost:6379/0"
 
     def validate_keys_on_startup(self) -> list[str]:
-        """필수 API 키 존재 여부를 확인하고 누락된 경고 목록을 반환합니다."""
+        """필수 API 키 및 보안 설정 존재 여부를 확인하고 경고 목록을 반환합니다."""
         warnings = []
-        if not self.gemini_api_key:
-            warnings.append("[Settings Warning] GEMINI_API_KEY가 설정되지 않았습니다. Gemini 기능이 비활성화되거나 오류가 발생할 수 있습니다.")
+        is_prod = self.app_env.lower() in ("production", "prod")
+
+        if not self.gemini_api_key and not self.groq_api_key and not self.openrouter_api_key and not self.openai_api_key:
+            warnings.append("[Settings Warning] AI 제공자 API 키(Gemini/Groq/OpenRouter/OpenAI)가 하나도 설정되지 않았습니다.")
+        elif not self.gemini_api_key:
+            warnings.append("[Settings Info] GEMINI_API_KEY가 없습니다. 대체 AI 제공자(Groq/OpenRouter/OpenAI 등)를 사용합니다.")
+
+        if not self.supabase_jwt_secret or not self.supabase_jwt_secret.strip():
+            if is_prod:
+                warnings.append("[CRITICAL SECURITY] 프로덕션 환경에서 SUPABASE_JWT_SECRET이 누락되었습니다! 인증이 필요한 모든 API 호출이 500 에러로 차단됩니다.")
+            else:
+                warnings.append("[Settings Warning] SUPABASE_JWT_SECRET이 설정되지 않았습니다 (로컬 개발 환경).")
+
         return warnings
 
 # 전역 싱글톤 설정 인스턴스

@@ -38,7 +38,9 @@ async def start_guide_generation(
     analogy_preset: str = Form("풍부한 비유"),
     learner_profile: str = Form(""),
     pdf_parsing_method: str = Form("basic"),
-    force_refresh: str = Form("false")
+    force_refresh: str = Form("false"),
+    custom_api_key: str = Form(""),
+    custom_base_url: str = Form("")
 ):
     job_id = f"job_{uuid.uuid4().hex}"
     create_job(job_id)
@@ -62,7 +64,9 @@ async def start_guide_generation(
         "analogy_preset": analogy_preset,
         "learner_profile": learner_profile,
         "pdf_parsing_method": pdf_parsing_method,
-        "force_refresh": is_force
+        "force_refresh": is_force,
+        "custom_api_key": custom_api_key.strip() if custom_api_key else None,
+        "custom_base_url": custom_base_url.strip() if custom_base_url else None
     }
     
     # Launch background task via Celery

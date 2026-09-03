@@ -12,6 +12,10 @@ def get_supabase_jwt_secret() -> str:
 
 def is_auth_disabled() -> bool:
     """Check if authentication is explicitly disabled for local offline testing."""
+    app_env = os.getenv("APP_ENV", "development").lower()
+    if app_env in ("production", "prod"):
+        # 운영 환경에서는 DISABLE_AUTH 설정이 있어도 절대 비활성화하지 않음 (보안 안전망)
+        return False
     disable_auth = os.getenv("DISABLE_AUTH", "").lower() in ("true", "1", "yes")
     return disable_auth
 
@@ -21,16 +25,16 @@ async def get_current_user(
     """
     FastAPI dependency to authenticate and extract the Supabase user from JWT.
     
-    1. If DISABLE_AUTH is true or no secret is provided in dev mode, returns a mock user.
-    2. Otherwise, strictly verifies the JWT token signature using HS256 and SUPABASE_JWT_SECRET.
+    1. Only in non-production local development with DISABLE_AUTH explicitly enabled, returns a mock user.
+    2. Otherwise, strictly verifies the JWT token signature using HS256, expiration, and SUPABASE_JWT_SECRET.
     """
     jwt_secret = get_supabase_jwt_secret()
     auth_disabled = is_auth_disabled()
     app_env = os.getenv("APP_ENV", "development").lower()
     is_dev = app_env in ("development", "dev", "local")
 
-    # Local fallback if auth is disabled or secret is missing in dev mode
-    if (auth_disabled or not jwt_secret) and is_dev:
+    # Local development explicit fallback
+    if is_dev and auth_disabled:
         return {
             "id": "dev-user-0001",
             "email": "developer@localhost.local",
@@ -38,7 +42,7 @@ async def get_current_user(
             "is_dev": True,
         }
 
-    # If secret is missing in production, fail safely with a 500 error
+    # If secret is missing, fail fast with a 500 configuration error
     if not jwt_secret:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -54,15 +58,27 @@ async def get_current_user(
         )
 
     token = credentials.credentials.strip()
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication token is empty.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     try:
-        # Decode and verify JWT
-        # Supabase tokens typically use audience='authenticated'
+        # Decode and strictly verify JWT
+        # algorithms=["HS256"] and options prevent algorithm confusion attacks
         payload = jwt.decode(
             token,
             jwt_secret,
             algorithms=["HS256"],
-            options={"verify_aud": False} # Supabase payload may contain aud='authenticated'
+            options={
+                "verify_signature": True,
+                "verify_alg": True,
+                "verify_exp": True,
+                "require": ["exp", "sub"],
+                "verify_aud": False,  # Supabase payload may contain aud='authenticated'
+            }
         )
 
         user_id = payload.get("sub") or payload.get("id")

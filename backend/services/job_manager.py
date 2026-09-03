@@ -6,29 +6,37 @@ from backend.data.database import SessionLocal, engine
 from backend.data.models import Base, Job, JobCheckpoint, StudyGuide, BatchJob, BatchVideoItem
 from typing import List, Optional
 
-from sqlalchemy import text, or_
+from sqlalchemy import text, or_, inspect
 
 # Create tables if they don't exist
 Base.metadata.create_all(bind=engine)
 
-# Auto-migrate missing columns for existing tables
-try:
-    with engine.begin() as conn:
-        # SQLite vs PostgreSQL compatibility
-        if "sqlite" in str(engine.url):
-            for col, col_type in [("logs", "TEXT DEFAULT '[]'"), ("remote_url", "TEXT"), ("sync_key", "TEXT")]:
-                try:
+def _ensure_schema_columns():
+    """DB 테이블에 필요한 컬럼 누락 여부를 안전하게 검사하고 보완합니다."""
+    try:
+        inspector = inspect(engine)
+        
+        # 1. batch_jobs 테이블 검사
+        batch_cols = {c["name"] for c in inspector.get_columns("batch_jobs")}
+        allowed_batch_cols = {
+            "logs": "TEXT DEFAULT '[]'",
+            "remote_url": "TEXT",
+            "sync_key": "TEXT"
+        }
+        with engine.begin() as conn:
+            for col, col_type in allowed_batch_cols.items():
+                if col not in batch_cols:
                     conn.execute(text(f"ALTER TABLE batch_jobs ADD COLUMN {col} {col_type}"))
-                except Exception:
-                    pass
-        else:
-            for col, col_type in [("logs", "TEXT DEFAULT '[]'"), ("remote_url", "TEXT"), ("sync_key", "TEXT")]:
-                try:
-                    conn.execute(text(f"ALTER TABLE batch_jobs ADD COLUMN IF NOT EXISTS {col} {col_type}"))
-                except Exception:
-                    pass
-except Exception as e:
-    print(f"[DB Migration Warning] {e}")
+                    
+        # 2. study_guides 테이블의 video_id 컬럼 검사
+        guide_cols = {c["name"] for c in inspector.get_columns("study_guides")}
+        if "video_id" not in guide_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE study_guides ADD COLUMN video_id VARCHAR"))
+    except Exception as e:
+        print(f"[DB Schema Init Notice] {e}")
+
+_ensure_schema_columns()
 
 
 def _format_datetime(val) -> str:
@@ -180,11 +188,15 @@ def get_completed_chapters(job_id: str) -> Dict[str, str]:
 
 def save_study_guide(job_id: str, url: str, title: str, image_url: str, provider: str, document: dict, learning_profile: str, profile_message: str, generation_time_sec: int, length_preset: str = None, analogy_preset: str = None, video_duration: str = None) -> None:
     with SessionLocal() as db:
+        from backend.services.video import extract_video_id
+        vid = extract_video_id(url) if url else None
+        
         doc_json = json.dumps(document, ensure_ascii=False)
         notes_json = json.dumps([], ensure_ascii=False)
         
         guide = db.query(StudyGuide).filter(StudyGuide.id == job_id).first()
         if guide:
+            guide.video_id = vid
             guide.url = url
             guide.title = title
             guide.image_url = image_url
@@ -199,7 +211,7 @@ def save_study_guide(job_id: str, url: str, title: str, image_url: str, provider
             guide.notes = notes_json
         else:
             guide = StudyGuide(
-                id=job_id, url=url, title=title, image_url=image_url, provider=provider,
+                id=job_id, video_id=vid, url=url, title=title, image_url=image_url, provider=provider,
                 document=doc_json, learning_profile=learning_profile, profile_message=profile_message,
                 generation_time_sec=generation_time_sec, length_preset=length_preset,
                 analogy_preset=analogy_preset, video_duration=video_duration, notes=notes_json
@@ -511,10 +523,10 @@ def get_all_presets_for_video(video_url: str) -> List[dict]:
         from backend.services.video import extract_video_id
         target_vid = extract_video_id(video_url) if video_url else ""
         
-        # DB 레벨 필터링으로 전체 풀스캔 방지
+        # DB 레벨 필터링: video_id 인덱스 컬럼 또는 완전 일치 url을 사용하여 와일드카드 주입 및 풀스캔 방지
         if target_vid:
             guides = db.query(StudyGuide).filter(
-                or_(StudyGuide.url == video_url, StudyGuide.url.contains(target_vid))
+                or_(StudyGuide.video_id == target_vid, StudyGuide.url == video_url)
             ).all()
         else:
             guides = db.query(StudyGuide).filter(StudyGuide.url == video_url).all()

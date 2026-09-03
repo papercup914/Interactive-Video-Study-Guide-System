@@ -92,12 +92,8 @@ def download_audio(url: str) -> str:
         'outtmpl': outtmpl,
         'quiet': True,
         'no_warnings': True,
-        'js_runtimes': {'node': {}},
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['mweb', 'web', 'android', 'ios']
-            }
-        },
+        'socket_timeout': 30,
+        'max_filesize': 100 * 1024 * 1024, # 최대 100MB로 제한하여 DoS 방지
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
             'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
@@ -128,6 +124,7 @@ def get_video_metadata(url: str) -> dict:
         'quiet': True,
         'no_warnings': True,
         'extract_flat': True,
+        'socket_timeout': 15,
         'js_runtimes': {'node': {}},
         'extractor_args': {
             'youtube': {
@@ -216,8 +213,8 @@ def _fetch_innertube_captions(video_id: str, cookie_file: str | None = None) -> 
     session = get_transcript_session(cookie_file)
         
     try:
-        # 1. HTML 요청으로 INNERTUBE_API_KEY 추출 시도 (실패 시 환경변수 또는 기본 키 사용)
-        api_key = os.getenv("YOUTUBE_INNERTUBE_KEY", "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8")
+        # 1. HTML 요청으로 INNERTUBE_API_KEY 추출 시도 (실패 시 환경변수 사용)
+        api_key = os.getenv("YOUTUBE_INNERTUBE_KEY", "")
         try:
             r_html = session.get(
                 f"https://www.youtube.com/watch?v={video_id}",

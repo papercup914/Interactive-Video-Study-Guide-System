@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { 
   Search, Sparkles, Loader2, Book, Clock, PlayCircle, Trash2, 
   Link as LinkIcon, Paperclip, FileText, X, HelpCircle, 
-  AlertTriangle, Settings, Timer, Layers, ChevronRight, CheckCircle2, Grid
+  AlertTriangle, Settings, Timer, Layers, ChevronRight, CheckCircle2, Grid, Key
 } from "lucide-react";
 import { useTask } from "@/app/contexts/TaskContext";
 
@@ -402,10 +402,22 @@ function GroupedGuideCard({
 export default function Home() {
   const router = useRouter();
   const [url, setUrl] = useState("");
-  const [provider, setProvider] = useState("google/gemini-3.6-flash");
+  const [provider, setProvider] = useState("groq/llama-3.3-70b-versatile");
   const [lengthPreset, setLengthPreset] = useState("Auto");
   const [analogyPreset, setAnalogyPreset] = useState("Auto");
   const [pdfParsingMethod, setPdfParsingMethod] = useState("option_b");
+  
+  // BYOK (Bring Your Own Key) & Multi-Provider Settings
+  const [customApiKey, setCustomApiKey] = useState("");
+  const [customBaseUrl, setCustomBaseUrl] = useState("");
+  const [showByokModal, setShowByokModal] = useState(false);
+
+  useEffect(() => {
+    const savedKey = localStorage.getItem("user_byok_api_key") || "";
+    const savedBase = localStorage.getItem("user_byok_base_url") || "";
+    if (savedKey) setCustomApiKey(savedKey);
+    if (savedBase) setCustomBaseUrl(savedBase);
+  }, []);
   
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
@@ -483,6 +495,8 @@ export default function Home() {
       formData.append("pdf_parsing_method", pdfParsingMethod);
       formData.append("learner_profile", learnerProfile);
       formData.append("force_refresh", String(isForce));
+      if (customApiKey) formData.append("custom_api_key", customApiKey);
+      if (customBaseUrl) formData.append("custom_base_url", customBaseUrl);
       
       if (files.length > 0) {
         files.forEach(f => formData.append("files", f));
@@ -648,12 +662,23 @@ export default function Home() {
                       value={provider}
                       onChange={(e) => setProvider(e.target.value)}
                     >
+                      <option value="groq/llama-3.3-70b-versatile">⚡ [무료 고속] Groq (Llama-3.3 70B)</option>
+                      <option value="openrouter/free">🌐 [무료] OpenRouter Free (Llama-3.3 / DeepSeek)</option>
                       <option value="google/gemini-3.6-flash">Google Gemini 3.6 Flash</option>
-                      <option value="cerebras/gpt-oss-120b">Cerebras (Llama3)</option>
                       <option value="OpenAI (GPT-4o)">OpenAI (GPT-4o)</option>
+                      <option value="cerebras/gpt-oss-120b">Cerebras (Llama3)</option>
                       <option value="glm-5.2">Zhipu GLM-5.2</option>
                       <option value="nvidia/nemotron-3-ultra-550b-a55b">Nvidia Nemotron-3 Ultra 550B</option>
                     </select>
+                    <button
+                      type="button"
+                      onClick={() => setShowByokModal(true)}
+                      className="text-[11px] px-2 py-0.5 rounded-full border border-border-subtle hover:bg-surface-variant text-text-secondary flex items-center gap-1 shrink-0 transition-colors ml-1"
+                      title="개인 API Key 연결 (BYOK)"
+                    >
+                      <Key size={11} className={customApiKey ? "text-primary" : "text-muted-foreground"} />
+                      <span>{customApiKey ? "개인 Key 사용 중" : "내 API Key 연결"}</span>
+                    </button>
                   </div>
                 </div>
                 <div className="w-px h-4 bg-border-subtle hidden sm:block"></div>
@@ -789,6 +814,112 @@ export default function Home() {
                 {isDeleting ? <Loader2 className="animate-spin" size={18} /> : <Trash2 size={18} />}
                 {deleteTargetGroup.totalPresets}개 전체 삭제
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BYOK (Bring Your Own Key) Settings Modal */}
+      {showByokModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[120] flex items-center justify-center p-4 animate-in fade-in" onClick={() => setShowByokModal(false)}>
+          <div className="bg-surface w-full max-w-lg rounded-2xl p-6 shadow-2xl animate-in zoom-in-95 border border-border-subtle" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-4 pb-3 border-b border-border-subtle">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-primary/10 text-primary">
+                  <Key size={20} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-text-primary">개인 AI API Key 설정 (BYOK)</h3>
+                  <p className="text-xs text-muted-foreground">내 전용 키를 연결하여 할당량 제한 없이 가이드를 생성합니다.</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowByokModal(false)}
+                className="text-muted-foreground hover:text-text-primary p-1.5 rounded-lg hover:bg-surface-variant transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="bg-surface-variant/50 p-3 rounded-xl border border-border-subtle text-xs text-muted-foreground leading-relaxed">
+                <span className="font-semibold text-text-primary">🔒 보안 안내: </span>
+                입력하신 키는 <b>서버 데이터베이스에 전혀 저장되지 않으며</b>, 오직 본인 브라우저(localStorage)에만 안전하게 보관됩니다.
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-text-primary mb-1">
+                  API Key (OpenAI / Gemini / Groq / OpenRouter 등)
+                </label>
+                <input
+                  type="password"
+                  placeholder="sk-..., gsk_..., sk-or-..., AIzaSy..."
+                  value={customApiKey}
+                  onChange={(e) => setCustomApiKey(e.target.value)}
+                  className="w-full bg-surface-container-low border border-border-subtle rounded-xl px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Groq(gsk_), OpenRouter(sk-or-), Gemini(AIzaSy), OpenAI(sk-) 키를 입력하면 자동으로 감지합니다.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-text-primary mb-1">
+                  Custom Base URL (선택 사항)
+                </label>
+                <input
+                  type="text"
+                  placeholder="예: https://api.groq.com/openai/v1 또는 사내 프록시 URL"
+                  value={customBaseUrl}
+                  onChange={(e) => setCustomBaseUrl(e.target.value)}
+                  className="w-full bg-surface-container-low border border-border-subtle rounded-xl px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 mt-6 pt-3 border-t border-border-subtle">
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomApiKey("");
+                  setCustomBaseUrl("");
+                  localStorage.removeItem("user_byok_api_key");
+                  localStorage.removeItem("user_byok_base_url");
+                  setShowByokModal(false);
+                }}
+                className="text-xs text-error hover:underline"
+              >
+                키 초기화 (기본 무료 AI 사용)
+              </button>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowByokModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-medium bg-surface-container-low border border-border-subtle text-text-secondary hover:bg-surface-variant transition-colors"
+                >
+                  취소
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (customApiKey) {
+                      localStorage.setItem("user_byok_api_key", customApiKey.trim());
+                    } else {
+                      localStorage.removeItem("user_byok_api_key");
+                    }
+                    if (customBaseUrl) {
+                      localStorage.setItem("user_byok_base_url", customBaseUrl.trim());
+                    } else {
+                      localStorage.removeItem("user_byok_base_url");
+                    }
+                    setShowByokModal(false);
+                  }}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-primary text-on-primary hover:opacity-90 transition-opacity"
+                >
+                  설정 저장
+                </button>
+              </div>
             </div>
           </div>
         </div>
