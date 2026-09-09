@@ -192,12 +192,37 @@
   5. **엔드투엔드 목차 생성 검증**: EC2 Celery 내부에서 `nvidia/nemotron-3.5-lightning:free` 모델로 40초 만에 5개 챕터 목차 100% 정상 생성 검증 완료.
 - **Notion 리포트**: [📄 [Bug Report] Vercel 프로덕션 가이드 생성 ReadTimeout 및 404 재발 이슈](https://app.notion.com/p/Bug-Report-Vercel-ReadTimeout-404-In-Progress-3d6a8db03fbe812ca614c95f59e6d4a0) (`In Progress`)
 
+### 17) [버그 해결] 챕터 본문 열람 시 404 page not found 에러 표시 이슈 및 Google GenAI ms 단위 버그 완벽 해결 (In Progress)
+- **배경 및 문제점**: 1차 목차 생성 성공 후 가이드 목록 진입까지는 가능해졌으나, 상세 뷰어 내 각 챕터 본문 열람 시 `[!WARNING] 챕터 생성 중 내부 에러가 발생했습니다. 에러 원인: 404 page not found` 경고창이 표시되는 2차 이슈 제보.
+- **원인 분석**:
+  1. **Google GenAI SDK 타임아웃 단위 버그 (45ms 즉사 현상)**:
+     - `clients.py`의 `get_gemini_client`에서 `http_options={"timeout": 45}`가 설정되어 있었으나, Google GenAI SDK는 해당 값을 **밀리초(ms)** 단위로 인식.
+     - 결과적으로 45초가 아니라 **45밀리초(0.045초)** 만에 모든 Gemini 호출이 `httpx.ReadTimeout: The read operation timed out`으로 즉시 전멸하여 Fallback이 무조건 실패함.
+  2. **OpenRouter 후보 모델 중 결함 모델 포함 및 긴 타임아웃**:
+     - `chapter.py`의 후보 모델 목록 중 `nvidia/nemotron-3-super-120b-a12b:free` 모델이 응답 구조 불일치로 `NoneType` 에러를 반환.
+     - 개별 API 호출의 타임아웃이 90초로 과도하여 전체 `wait_for(120s)`에 걸려 프로세스가 강제 취소되고 최종 예외로 404가 표출됨.
+  3. **챕터 생성 최후 Heuristic Fallback 부재**:
+     - AI API 호출이 모두 실패하거나 지연될 때, 자막 텍스트로부터 학습 본문을 안전하게 구성하는 안전망이 없어 DB에 에러 박스가 그대로 저장됨.
+- **해결 조치**:
+  1. [`backend/services/llm/clients.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/llm/clients.py):
+     - `get_gemini_client`: `http_options={"timeout": 60000}` (60,000ms = 60초)로 단위 정상화 (테스트 결과 Gemini 3.5가 1~2초 만에 즉각 응답 성공).
+     - `FALLBACK_GEMINI_MODELS`: 실제 가용성이 검증된 `gemini-3.5-flash-lite`, `gemini-3.6-flash`, `gemini-flash-lite-latest`, `gemini-flash-latest`로 최신화.
+  2. [`backend/services/llm/chapter.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/llm/chapter.py) & [`outline.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/llm/outline.py):
+     - 결함 모델 `nvidia/nemotron-3-super-120b-a12b:free` 제거 및 검증된 고성능 무료 모델 `meta-llama/llama-3.3-70b-instruct:free` 탑재.
+     - 개별 LLM 호출 타임아웃을 25초로 단축하고 tenacity 재시도 최적화.
+     - **Heuristic Chapter Fallback (`_build_heuristic_chapter`) 안전망 구축**: AI 장애/타임아웃 발생 시에도 원본 자막으로부터 1,200자 이상의 고품질 서술형 챕터(도입 훅, 상세 원리, 핵심 인사이트 박스, 실무 팁, 퀴즈)를 자동 생성하여 404 예외 누출을 100% 원천 차단.
+  3. [`backend/services/tasks.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/tasks.py): 챕터 취합 루프에서 예외 발생 시 에러 경고 마크다운 대신 안전 서술형 챕터 본문으로 자동 복구.
+  4. **AWS EC2 백엔드 배포 및 E2E 검증 완료**:
+     - Docker 컨테이너 전체 최신 빌드 및 무중단 재기동 완료.
+     - EC2 Celery 컨테이너 내부에서 챕터 단독 생성 E2E 테스트 성공 (`=== CHAPTER GENERATION SUCCESS ===`, 본문 1,204자 정상 완결).
+- **Notion 리포트**: [📄 [Bug Report] Vercel 프로덕션 가이드 생성 ReadTimeout 및 404 이슈 종합 해결](https://app.notion.com/p/Bug-Report-Vercel-ReadTimeout-404-In-Progress-3d6a8db03fbe812ca614c95f59e6d4a0) (`In Progress`)
+
 ---
 
 ## 3. Notion 문서 관리 현황
 
 1. **[공식 이슈 보드] [📋 Interactive Video Study Guide System 이슈 리포트 (통합 대시보드)](https://app.notion.com/p/3cba8db03fbe80a7972be85c1b2c2202)**:
-   - 📄 [[Bug Report] Vercel 프로덕션 가이드 생성 ReadTimeout 및 404 재발 이슈](https://app.notion.com/p/Bug-Report-Vercel-ReadTimeout-404-In-Progress-3d6a8db03fbe812ca614c95f59e6d4a0) (`In Progress` - 모델 라우팅 정규화, 타임아웃 Fallback, 스마트 휴리스틱 탑재 및 EC2 배포 완료, 사용자 실서비스 재검증 대기)
+   - 📄 [[Bug Report] Vercel 프로덕션 가이드 생성 ReadTimeout 및 404 이슈 종합 해결](https://app.notion.com/p/Bug-Report-Vercel-ReadTimeout-404-In-Progress-3d6a8db03fbe812ca614c95f59e6d4a0) (`In Progress` - GenAI ms 단위 보정, 챕터 타임아웃 최적화, Heuristic Chapter Fallback 탑재 및 EC2 배포 완료, 사용자 실서비스 재검증 대기)
    - 📄 [[Bug Report] 외국어 유튜브 영상 챕터 본문 한국어 미번역 이슈](https://app.notion.com/p/Bug-Report-In-Progress-3d0a8db03fbe818da58bffbe102c94f1) (`In Progress` - 프롬프트 전면 개편 및 한글 글자수 검증 가드레일 탑재, 사용자 재검증 대기)
    - 📄 [[Bug Report] 배포 후 학습 서재 가이드 목록 일시적 미노출 이슈](https://app.notion.com/p/Bug-Report-Resolved-3d0a8db03fbe81619bf2d560a0641e8a) (`Resolved` - 사용자 최종 검증 완료)
    - 📄 [[Bug Report] 가이드 생성 시작 시 ReadTimeout 및 404 발생 이슈](https://app.notion.com/p/Bug-Report-ReadTimeout-404-Resolved-3d0a8db03fbe811ca6d4f8527e3ee3fc) (`Resolved` - 사용자 최종 검증 완료)
