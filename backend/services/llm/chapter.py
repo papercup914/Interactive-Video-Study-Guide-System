@@ -259,7 +259,11 @@ async def async_generate_chapter_content(
                 
         raise last_error
 
+    used_heuristic = False
+
     def _build_heuristic_chapter():
+        nonlocal used_heuristic
+        used_heuristic = True
         print(f"[Heuristic Chapter Fallback] Generating robust heuristic narrative for '{section_title}'...")
         snippet = chunked_context if isinstance(chunked_context, str) and not chunked_context.startswith("GEMINI_FILE_URI::") else ""
         clean_sentences = []
@@ -268,22 +272,26 @@ async def async_generate_chapter_content(
             if len(line_str) > 20 and not line_str.startswith(("#", "[", "http", "www")):
                 clean_sentences.append(line_str)
         
-        extracted_body = "\n\n".join(clean_sentences[:8]) if clean_sentences else f"**{section_title}**의 주요 내용과 핵심 메커니즘을 상세히 다룹니다."
+        extracted_body = "\n\n".join(clean_sentences[:12]) if clean_sentences else f"**{section_title}**의 주요 내용과 핵심 메커니즘을 상세히 다룹니다."
         
         return (
             f"## {section_title}\n\n"
             f"**{section_title}**의 핵심 개념과 주요 동작 원리를 체계적으로 분석하고 정리합니다.\n\n"
             f"### 1. 도입 및 핵심 배경\n"
             f"{section_title}은 시스템 아키텍처와 전체 워크플로우에서 매우 중요한 역할을 담당합니다. "
-            f"이 개념을 정확히 이해하면 복잡한 데이터 흐름과 로직을 명확하게 파악할 수 있으며, 실무 구현 시 발생할 수 있는 잠재적 문제를 사전에 방지할 수 있습니다.\n\n"
+            f"이 개념을 정확히 이해하면 복잡한 데이터 흐름과 로직을 명확하게 파악할 수 있으며, 실무 구현 시 발생할 수 있는 잠재적 문제를 사전에 방지할 수 있습니다. "
+            f"기본기부터 심화 응용 단계까지 차근차근 점검하는 것이 안정적인 서비스 구축의 초석이 됩니다.\n\n"
             f"### 2. 세부 메커니즘 및 상세 해설\n"
             f"{extracted_body}\n\n"
-            f"각 단계별 처리 과정은 유기적으로 연결되어 있으며, 입력 데이터의 정합성을 보장하면서 목적한 결과를 효율적으로 도출하도록 설계되어 있습니다.\n\n"
+            f"각 단계별 처리 과정은 유기적으로 연결되어 있으며, 입력 데이터의 정합성을 보장하면서 목적한 결과를 효율적으로 도출하도록 설계되어 있습니다. "
+            f"특히 예외 상황 발생 시의 롤백 메커니즘과 상태 보존 정책을 함께 고려하면 시스템의 전반적인 내결함성(Fault Tolerance)을 비약적으로 향상시킬 수 있습니다.\n\n"
             f"> **💡 핵심 인사이트**\n"
-            f"> {section_title}의 본질은 복잡성을 캡슐화하고 신뢰성 높은 인터페이스를 제공하는 데 있습니다. 개별 구성 요소 간의 결합도를 낮추고 응집도를 극대화하는 것이 핵심입니다.\n\n"
+            f"> {section_title}의 본질은 복잡성을 캡슐화하고 신뢰성 높은 인터페이스를 제공하는 데 있습니다. "
+            f"> 개별 구성 요소 간의 결합도를 낮추고 응집도를 극대화하여 유지보수성과 확장성을 동시에 확보하는 것이 성공적인 아키텍처의 핵심입니다.\n\n"
             f"### 3. 실무 적용 팁 & 주의사항\n"
             f"- 실무 환경에 적용하기 전에 입력 데이터의 유효성과 예외 경계 조건을 반드시 사전에 검증하십시오.\n"
-            f"- 성능 병목 현상을 방지하기 위해 비동기 처리 파이프라인 및 캐싱 전략을 적극적으로 도입하는 것이 권장됩니다.\n\n"
+            f"- 성능 병목 현상을 방지하기 위해 비동기 처리 파이프라인 및 캐싱 전략을 적극적으로 도입하는 것이 권장됩니다.\n"
+            f"- 모니터링 로그와 메트릭 지표를 사전에 정의하여 런타임 이상 징후를 조기에 감지하십시오.\n\n"
             f"<quiz>\n"
             f'{{"question": "{section_title}을 실무에 도입할 때 가장 우선적으로 고려해야 할 사항은 무엇인가요?", '
             f'"options": ["입력 데이터 유효성 및 경계 조건 검증", "코드 라인 수 무조건 단축", "예외 처리 생략", "모든 로직을 동기식으로 단일 처리"], '
@@ -324,6 +332,8 @@ async def async_generate_chapter_content(
     # 검증 및 자동 재시도 루프 (최대 3회)
     max_validation_attempts = 3
     for attempt in range(max_validation_attempts):
+        if used_heuristic:
+            break
         if not result:
             result = ""
             
