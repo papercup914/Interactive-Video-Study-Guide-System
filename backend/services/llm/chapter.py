@@ -170,7 +170,7 @@ async def async_generate_chapter_content(
     current_system_prompt = base_system_prompt
     current_user_instruction = base_user_instruction
     
-    @retry(retry=retry_if_exception(_should_retry_error), stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=30))
+    @retry(retry=retry_if_exception(_should_retry_error), stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1.5, min=2, max=5))
     def _call_gemini_with_retry():
         client = get_gemini_client(custom_api_key=custom_api_key)
         model_id = settings.selected_gemini_version or "gemini-3.5-flash-lite"
@@ -211,7 +211,7 @@ async def async_generate_chapter_content(
             )
             return response.text
 
-    @retry(retry=retry_if_exception(_should_retry_error), stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1.5, min=2, max=10))
+    @retry(retry=retry_if_exception(_should_retry_error), stop=stop_after_attempt(1))
     def _call_openai_with_retry(target_provider="OpenAI (GPT-4o)"):
         target_model = target_provider or "OpenAI (GPT-4o)"
         p_lower = str(target_provider).lower()
@@ -230,7 +230,7 @@ async def async_generate_chapter_content(
         elif "nvidia" in p_lower:
             target_model = "nvidia/nemotron-3.5-lightning:free"
             
-        client = get_openai_client(target_provider, custom_api_key=custom_api_key, custom_base_url=custom_base_url, timeout=90.0)
+        client = get_openai_client(target_provider, custom_api_key=custom_api_key, custom_base_url=custom_base_url, timeout=25.0)
         candidate_models = [target_model]
         if "openrouter" in p_lower or ":free" in p_lower:
             for fallback_m in ("nvidia/nemotron-3.5-lightning:free", "nvidia/nemotron-3-ultra-550b-a55b:free", "meta-llama/llama-3.3-70b-instruct:free"):
@@ -314,10 +314,10 @@ async def async_generate_chapter_content(
                     return _build_heuristic_chapter()
 
     try:
-        result = await asyncio.wait_for(loop.run_in_executor(_llm_executor, _call_api), timeout=120.0)
-    except asyncio.TimeoutError:
-        print(f"[LLM Timeout Warning] Chapter '{section_title}' timed out after 120s. Retrying once...")
-        result = await asyncio.wait_for(loop.run_in_executor(_llm_executor, _call_api), timeout=120.0)
+        result = await asyncio.wait_for(loop.run_in_executor(_llm_executor, _call_api), timeout=60.0)
+    except Exception as wait_err:
+        print(f"[LLM Wait Exception/Timeout] Chapter '{section_title}' timed out or failed ({wait_err}). Generating robust heuristic chapter...")
+        result = _build_heuristic_chapter()
 
     result = sanitize_chapter_narrative(result, section_title)
     
