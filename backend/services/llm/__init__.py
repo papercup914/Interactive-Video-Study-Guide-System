@@ -1,16 +1,9 @@
 """
-backend.services.llm - 하위 호환성을 위한 파사드(Facade) 모듈
-실제 기능 단위 구현은 backend.services.llm/ 패키지의 각 모듈로 분리되었습니다:
-- clients.py: API 클라이언트 및 재시도 설정
-- cache.py: 챕터 캐시 및 컨텍스트 캐시 관리
-- validators.py: 챕터 텍스트 살균 및 유효성 검증
-- audio.py: 오디오 전사 및 청킹
-- outline.py: 목차 생성
-- chapter.py: 챕터 본문 비동기 생성 및 가드레일
-- profiling.py: 프로파일링, 제목 번역, 키워드 추출, Q&A
+backend.services.llm 패키지
+LLM 클라이언트, 캐시, 검증, 오디오, 아웃라인, 챕터 생성, 프로파일링 서브모듈을 통합 노출합니다.
 """
 
-from backend.services.llm import (
+from backend.services.llm.clients import (
     safe_gemini_generate_content,
     get_gemini_client,
     is_gemini_provider,
@@ -18,19 +11,37 @@ from backend.services.llm import (
     FALLBACK_GEMINI_MODELS,
     _should_retry_error,
     _MAX_LLM_WORKERS,
-    _llm_executor,
+    _llm_executor
+)
+
+from backend.services.llm.cache import (
     get_or_create_document_cache,
     clean_invalid_cached_chapters,
-    _get_cache_dir,
+    _get_cache_dir
+)
+
+from backend.services.llm.validators import (
     sanitize_chapter_narrative,
     validate_chapter_narrative,
     INTERACTIVE_TAGS,
     INTERACTIVE_TAG_PATTERN,
-    FORBIDDEN_START_PATTERN,
+    FORBIDDEN_START_PATTERN
+)
+
+from backend.services.llm.audio import (
     process_audio,
-    _split_audio_if_needed,
-    generate_outline,
-    async_generate_chapter_content,
+    _split_audio_if_needed
+)
+
+from backend.services.llm.outline import (
+    generate_outline
+)
+
+from backend.services.llm.chapter import (
+    async_generate_chapter_content
+)
+
+from backend.services.llm.profiling import (
     generate_answer,
     translate_title,
     extract_image_keyword,

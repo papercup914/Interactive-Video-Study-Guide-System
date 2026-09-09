@@ -1,9 +1,6 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from dotenv import load_dotenv
-
-load_dotenv(override=False)
-load_dotenv("backend/.env", override=False)
+from backend.config import settings
 
 app = FastAPI(
     title="Interactive Video Study Guide API",
@@ -11,11 +8,10 @@ app = FastAPI(
     version="1.0.0"
 )
 
-import os
 from fastapi.responses import JSONResponse
 
 # Configure dynamic CORS for frontend access (Vercel & localhost)
-raw_cors = os.getenv("CORS_ORIGINS", "*").strip()
+raw_cors = (settings.cors_origins or "*").strip()
 if raw_cors == "*" or not raw_cors:
     allow_origins = ["*"]
 else:
@@ -31,7 +27,7 @@ app.add_middleware(
 
 @app.middleware("http")
 async def block_qa_header_in_prod(request: Request, call_next):
-    env = os.getenv("APP_ENV", "").lower()
+    env = (settings.app_env or "").lower()
     is_dev = env in ("development", "dev", "local")
     if not is_dev and request.headers.get("x-qa-test-mode"):
         return JSONResponse(

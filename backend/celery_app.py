@@ -2,14 +2,10 @@ import os
 import ssl
 import certifi
 from celery import Celery
-from dotenv import load_dotenv
+from backend.config import settings
 
-load_dotenv(override=True)
-load_dotenv("backend/.env", override=True)
-
-redis_url = os.getenv("REDIS_URL", "").strip()
-CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "").strip() or redis_url or "redis://localhost:6379/0"
-CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "").strip() or redis_url or "redis://localhost:6379/0"
+CELERY_BROKER_URL = settings.get_celery_broker()
+CELERY_RESULT_BACKEND = settings.get_celery_backend()
 
 celery_app = Celery(
     "studyguide_worker",

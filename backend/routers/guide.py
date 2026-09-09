@@ -87,37 +87,46 @@ async def check_existing_guide(url: str):
             
     return {"exists": False}
 
-def normalize_length_preset(val: Optional[str]) -> str:
-    if not val:
-        return "적당한 설명"
-    v = val.strip().lower()
-    if v in ["핵심 요약", "basic", "short", "summary", "quick"]:
-        return "핵심 요약"
-    if v in ["적당한 설명", "standard", "medium", "normal"]:
-        return "적당한 설명"
-    if v in ["아주 상세하게", "deep", "detailed", "long"]:
-        return "아주 상세하게"
-    return "적당한 설명"
-
-def normalize_analogy_preset(val: Optional[str]) -> str:
-    if not val:
-        return "적절한 비유 추가"
-    v = val.strip().lower()
-    if v in ["비유 없이 담백하게", "academic", "none", "plain"]:
-        return "비유 없이 담백하게"
-    if v in ["적절한 비유 추가", "standard", "moderate", "curriculum"]:
-        return "적절한 비유 추가"
-    if v in ["풍부한 비유", "story", "rich", "feynman"]:
-        return "풍부한 비유"
-    return "적절한 비유 추가"
+from backend.constants.presets import (
+    normalize_length_preset,
+    normalize_analogy_preset,
+    extract_video_key
+)
 
 def extract_key_for_group(url: Optional[str], title: Optional[str]) -> str:
-    if not url:
-        return (title or "unknown").strip().lower()
-    vid = extract_video_id(url)
-    if vid:
-        return f"yt_{vid}"
-    return url.strip().lower()
+    """하위 호환용 래퍼 함수"""
+    return extract_video_key(url, title)
+
+def build_presets_map(sibling_guides: list, target_title: str) -> dict:
+    """형제 가이드 목록을 받아 프리셋 매트릭스 맵(key: length__analogy)을 구성합니다."""
+    presets_map = {}
+    for g in sibling_guides:
+        raw_length = g.get("length_preset")
+        raw_analogy = g.get("analogy_preset")
+        length = normalize_length_preset(raw_length)
+        analogy = normalize_analogy_preset(raw_analogy)
+        key = f"{length}__{analogy}"
+        
+        doc = g.get("document", {})
+        chapter_count = len(doc) if isinstance(doc, dict) else 0
+        
+        g_title = g.get("title", "")
+        if not g_title or g_title.strip() == "- YouTube":
+            g_title = target_title if target_title and target_title.strip() != "- YouTube" else "YouTube 학습 가이드"
+            
+        presets_map[key] = {
+            "id": g.get("id"),
+            "title": g_title,
+            "url": g.get("url", ""),
+            "date": g.get("date", ""),
+            "length_preset": length,
+            "analogy_preset": analogy,
+            "chapter_count": chapter_count,
+            "provider": g.get("provider", ""),
+            "image_url": g.get("image_url", ""),
+            "video_duration": g.get("video_duration", "")
+        }
+    return presets_map
 
 @router.get("/presets")
 async def get_video_presets(job_id: Optional[str] = None, url: Optional[str] = None):
@@ -128,28 +137,24 @@ async def get_video_presets(job_id: Optional[str] = None, url: Optional[str] = N
         target_title = ""
         target_url = url or ""
         
-        guides = get_all_study_guides()
-        if not guides:
-            return {"url": target_url, "presets": {}, "total_presets": 0, "current_job_id": job_id}
-            
+        all_guides = get_all_study_guides()
         current_guide = None
+        
         if job_id:
-            for g in guides:
-                if g.get("id") == job_id:
-                    current_guide = g
-                    target_url = g.get("url", "")
-                    target_title = g.get("title", "")
-                    break
-                    
-        target_key = extract_key_for_group(target_url, target_title)
-            
+            current_guide = get_study_guide(job_id)
+            if current_guide:
+                target_url = current_guide.get("url") or target_url
+                target_title = current_guide.get("title") or ""
+                
+        target_key = extract_video_key(target_url, target_title)
+        
         sibling_guides = []
-        for g in guides:
+        for g in all_guides:
             if not g:
                 continue
             g_url = g.get("url", "")
             g_title = g.get("title", "")
-            g_key = extract_key_for_group(g_url, g_title)
+            g_key = extract_video_key(g_url, g_title)
             
             if target_key == g_key:
                 sibling_guides.append(g)
@@ -158,34 +163,8 @@ async def get_video_presets(job_id: Optional[str] = None, url: Optional[str] = N
             elif target_title and g_title and target_title.strip() == g_title.strip():
                 sibling_guides.append(g)
                 
-        presets_map = {}
-        for g in sibling_guides:
-            raw_length = g.get("length_preset")
-            raw_analogy = g.get("analogy_preset")
-            length = normalize_length_preset(raw_length)
-            analogy = normalize_analogy_preset(raw_analogy)
-            key = f"{length}__{analogy}"
-            
-            doc = g.get("document", {})
-            chapter_count = len(doc) if isinstance(doc, dict) else 0
-            
-            g_title = g.get("title", "")
-            if not g_title or g_title.strip() == "- YouTube":
-                g_title = target_title if target_title and target_title.strip() != "- YouTube" else "YouTube 학습 가이드"
-                
-            presets_map[key] = {
-                "id": g.get("id"),
-                "title": g_title,
-                "url": g.get("url", ""),
-                "date": g.get("date", ""),
-                "length_preset": length,
-                "analogy_preset": analogy,
-                "chapter_count": chapter_count,
-                "provider": g.get("provider", ""),
-                "image_url": g.get("image_url", ""),
-                "video_duration": g.get("video_duration", "")
-            }
-            
+        presets_map = build_presets_map(sibling_guides, target_title)
+        
         final_title = target_title or (current_guide.get("title") if current_guide else "")
         if not final_title or final_title.strip() == "- YouTube":
             final_title = "YouTube 학습 가이드"

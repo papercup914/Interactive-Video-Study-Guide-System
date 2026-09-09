@@ -43,17 +43,7 @@ export type GroupedGuide = {
   defaultItem: HistoryItem;
 };
 
-const LENGTH_PRESETS = ["핵심 요약", "적당한 설명", "아주 상세하게"] as const;
-const ANALOGY_PRESETS = ["비유 없이 담백하게", "적절한 비유 추가", "풍부한 비유"] as const;
-
-function extractVideoKey(url: string, title: string): string {
-  if (!url) return title || "unknown";
-  const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([^&?]+)/);
-  if (ytMatch && ytMatch[1]) {
-    return `yt_${ytMatch[1]}`;
-  }
-  return url.trim().toLowerCase();
-}
+import { LENGTH_PRESETS, ANALOGY_PRESETS, extractVideoKey } from "@/lib/presets";
 
 function groupHistoryItems(items: HistoryItem[]): GroupedGuide[] {
   const map = new Map<string, GroupedGuide>();

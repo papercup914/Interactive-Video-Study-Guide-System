@@ -14,6 +14,18 @@ const GREETING_REGEX_3 = /^\s*(?:\*\*)?(?:안녕하세요|반갑습니다|환영
 const TAGS_TO_PROCESS = ['quiz', 'feynman', 'steptracer', 'mnemonic', 'procedure'] as const;
 
 /**
+ * 텍스트 기반 초고속 충돌 방지 해시 함수 (FNV-1a 32-bit 변형)
+ */
+function fastHash(str: string): string {
+  let hash = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16);
+}
+
+/**
  * 마크다운 텍스트에서 불필요한 메타 태그, 인사말을 정제하고 인터랙티브 위젯 태그를 정규화합니다.
  */
 export function cleanAndNormalizeMarkdown(sectionName: string, text: string): string {
@@ -48,18 +60,18 @@ export function cleanAndNormalizeMarkdown(sectionName: string, text: string): st
   // Fix CommonMark parsing bug with Korean particles attached to markdown markers.
   processed = processed.replace(/(\*\*|__|\*|_)(?=[가-힣])/g, '$1<!-- -->');
   
-  // Normalize hyphenated/underscored custom tag names (e.g. <step_tracer>, <step-tracer> -> <steptracer>)
+  // Normalize hyphenated/underscored custom tag names
   processed = processed.replace(/<\s*(\/?)\s*(?:step[-_]tracer|steptracer)\b([^>]*)>/gi, '<$1steptracer$2>');
   
   // Unwrap markdown code fences wrapping custom tags
   processed = processed.replace(/```[\w-]*\s*\n?\s*(<(?:quiz|feynman|steptracer|mnemonic|procedure|discussion)[\s\S]*?<\/(?:quiz|feynman|steptracer|mnemonic|procedure|discussion)>)\s*(?:```)?/gi, '$1');
   
-  TAGS_TO_PROCESS.forEach(tag => {
-    // Normalize tag spaces (e.g. < feynman > -> <feynman>)
+  for (const tag of TAGS_TO_PROCESS) {
+    // Normalize tag spaces
     processed = processed.replace(new RegExp(`<\\s*${tag}\\s*>`, 'gi'), `<${tag}>`);
     processed = processed.replace(new RegExp(`<\\/\\s*${tag}\\s*>`, 'gi'), `</${tag}>`);
     
-    // Auto-wrap leaked raw JSON payloads (Defensive Fallback)
+    // Defensive Fallback: Auto-wrap leaked raw JSON payloads
     if (tag === 'feynman') {
       const rawJsonFeynmanRegex = /{\s*"tag_team_scenario"[\s\S]*?}/gi;
       processed = processed.replace(rawJsonFeynmanRegex, (match) => {
@@ -96,7 +108,7 @@ export function cleanAndNormalizeMarkdown(sectionName: string, text: string): st
     processed = processed.replace(tagRegex, (_fullMatch, rawInner) => {
       let jsonContent = rawInner.trim();
       jsonContent = jsonContent.replace(/```[\w-]*\n?/g, '').replace(/```/g, '').replace(/`/g, '').trim();
-      jsonContent = jsonContent.replace(/,\s*([\]}])/g, '$1'); // Remove trailing commas
+      jsonContent = jsonContent.replace(/,\s*([\]}])/g, '$1');
       if (tag === 'quiz' && !jsonContent.startsWith("[") && jsonContent.includes("{")) {
         jsonContent = `[${jsonContent}]`;
       }
@@ -105,19 +117,19 @@ export function cleanAndNormalizeMarkdown(sectionName: string, text: string): st
     
     // Wrap properly closed tags in div
     const wrapRegex = new RegExp(`<${tag}([^>]*?)>([\\s\\S]*?)<\\/${tag}>`, 'gi');
-    processed = processed.replace(wrapRegex, (match, p1, p2) => {
+    processed = processed.replace(wrapRegex, (_match, p1, p2) => {
       return `\n\n<div className="custom-${tag}-wrapper"><${tag}${p1}>${p2}</${tag}></div>\n\n`;
     });
     
     // Convert self-closing tags and wrap in div
     const selfCloseRegex = new RegExp(`<${tag}([^>]*?)\\/>`, 'gi');
-    processed = processed.replace(selfCloseRegex, (match, p1) => {
+    processed = processed.replace(selfCloseRegex, (_match, p1) => {
       return `\n\n<div className="custom-${tag}-wrapper"><${tag}${p1}></${tag}></div>\n\n`;
     });
-  });
+  }
   
   // Convert <discussion /> to <discussion></discussion> and wrap in div
-  processed = processed.replace(/<discussion([^>]*?)\/>/gi, (match, p1) => {
+  processed = processed.replace(/<discussion([^>]*?)\/>/gi, (_match, p1) => {
     return `\n\n<div className="custom-discussion-wrapper"><discussion${p1}></discussion></div>\n\n`;
   });
 
@@ -140,7 +152,7 @@ export function injectNotes(cleanedMarkdown: string, sectionName: string, notes:
     const escaped = note.selected_text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const regex = new RegExp(`(\\*\\*|__|\\*|_)?(${escaped})(\\*\\*|__|\\*|_)?`, 'g');
     
-    processed = processed.replace(regex, (match, p1, p2, p3) => {
+    processed = processed.replace(regex, (_match, p1, p2, p3) => {
       if (p1 && p3 && p1 === p3) {
         return `<mark id="${note.id}" class="bg-foreground text-background rounded px-1 cursor-pointer transition-colors shadow-sm " title="노트 보기">${p1}${p2}${p3}</mark>`;
       }
@@ -157,10 +169,12 @@ const MAX_CACHE_SIZE = 200;
 
 /**
  * 정규화 캐시를 활용하여 마크다운을 정제하고 노트를 주입합니다.
+ * 해시 기반 캐시 키를 사용하여 충돌을 방지합니다.
  */
 export function processMarkdownWithNotes(sectionName: string, text: string, notes: Note[]): string {
   if (!text) return "";
-  const cacheKey = `${sectionName}::${text.length}::${text.slice(0, 40)}::${text.slice(-40)}`;
+  const contentHash = fastHash(text);
+  const cacheKey = `${sectionName}::${text.length}::${contentHash}`;
   let cleaned = markdownCleanCache.get(cacheKey);
   if (!cleaned) {
     cleaned = cleanAndNormalizeMarkdown(sectionName, text);
@@ -172,4 +186,3 @@ export function processMarkdownWithNotes(sectionName: string, text: string, note
   }
   return injectNotes(cleaned, sectionName, notes);
 }
-

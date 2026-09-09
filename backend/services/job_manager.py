@@ -8,12 +8,16 @@ from typing import List, Optional
 
 from sqlalchemy import text, or_, inspect
 
-# Create tables if they don't exist
-Base.metadata.create_all(bind=engine)
+# Lazy / idempotent schema initialization flag
+_schema_initialized = False
 
-def _ensure_schema_columns():
-    """DB 테이블에 필요한 컬럼 누락 여부를 안전하게 검사하고 보완합니다."""
+def init_db_schema() -> None:
+    """DB 테이블 및 누락된 컬럼을 안전하게 검사하고 초기화합니다 (멱등성 보장)."""
+    global _schema_initialized
+    if _schema_initialized:
+        return
     try:
+        Base.metadata.create_all(bind=engine)
         inspector = inspect(engine)
         
         # 1. batch_jobs 테이블 검사
@@ -33,10 +37,12 @@ def _ensure_schema_columns():
         if "video_id" not in guide_cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE study_guides ADD COLUMN video_id VARCHAR"))
+        _schema_initialized = True
     except Exception as e:
         print(f"[DB Schema Init Notice] {e}")
 
-_ensure_schema_columns()
+# 안전한 최초 1회 초기화 (오류 발생 시 앱 중단 없이 로깅)
+init_db_schema()
 
 
 def _format_datetime(val) -> str:
@@ -186,34 +192,70 @@ def get_completed_chapters(job_id: str) -> Dict[str, str]:
         checkpoints = db.query(JobCheckpoint).filter(JobCheckpoint.job_id == job_id).all()
         return {cp.section_title: cp.content for cp in checkpoints}
 
-def save_study_guide(job_id: str, url: str, title: str, image_url: str, provider: str, document: dict, learning_profile: str, profile_message: str, generation_time_sec: int, length_preset: str = None, analogy_preset: str = None, video_duration: str = None) -> None:
+def save_study_guide(
+    job_id_or_dto: Any = None, 
+    url: str = "", 
+    title: str = "", 
+    image_url: str = "", 
+    provider: str = "", 
+    document: dict = None, 
+    learning_profile: str = "", 
+    profile_message: str = "", 
+    generation_time_sec: int = 0, 
+    length_preset: str = None, 
+    analogy_preset: str = None, 
+    video_duration: str = None,
+    **kwargs
+) -> None:
+    """
+    학습 가이드를 DB에 저장하거나 갱신합니다.
+    StudyGuideCreateDTO 객체 또는 개별 위치 인자를 모두 유연하게 수용합니다.
+    """
+    from backend.schemas.guide import StudyGuideCreateDTO
+    if isinstance(job_id_or_dto, StudyGuideCreateDTO):
+        job_id = job_id_or_dto.job_id
+        url = job_id_or_dto.url
+        title = job_id_or_dto.title
+        image_url = job_id_or_dto.image_url
+        provider = job_id_or_dto.provider
+        document = job_id_or_dto.document
+        learning_profile = job_id_or_dto.learning_profile
+        profile_message = job_id_or_dto.profile_message
+        generation_time_sec = job_id_or_dto.generation_time_sec
+        length_preset = job_id_or_dto.length_preset
+        analogy_preset = job_id_or_dto.analogy_preset
+        video_duration = job_id_or_dto.video_duration
+    else:
+        job_id = str(job_id_or_dto or kwargs.get("job_id", ""))
+
     with SessionLocal() as db:
         from backend.services.video import extract_video_id
         vid = extract_video_id(url) if url else None
         
-        doc_json = json.dumps(document, ensure_ascii=False)
+        doc_json = json.dumps(document or {}, ensure_ascii=False)
         notes_json = json.dumps([], ensure_ascii=False)
         
         guide = db.query(StudyGuide).filter(StudyGuide.id == job_id).first()
         if guide:
             guide.video_id = vid
-            guide.url = url
-            guide.title = title
-            guide.image_url = image_url
-            guide.provider = provider
+            guide.url = url or ""
+            guide.title = title or ""
+            guide.image_url = image_url or ""
+            guide.provider = provider or "youtube"
             guide.document = doc_json
-            guide.learning_profile = learning_profile
-            guide.profile_message = profile_message
-            guide.generation_time_sec = generation_time_sec
+            guide.learning_profile = learning_profile or ""
+            guide.profile_message = profile_message or ""
+            guide.generation_time_sec = generation_time_sec or 0
             guide.length_preset = length_preset
             guide.analogy_preset = analogy_preset
             guide.video_duration = video_duration
-            guide.notes = notes_json
+            if not guide.notes:
+                guide.notes = notes_json
         else:
             guide = StudyGuide(
-                id=job_id, video_id=vid, url=url, title=title, image_url=image_url, provider=provider,
-                document=doc_json, learning_profile=learning_profile, profile_message=profile_message,
-                generation_time_sec=generation_time_sec, length_preset=length_preset,
+                id=job_id, video_id=vid, url=url or "", title=title or "", image_url=image_url or "", provider=provider or "youtube",
+                document=doc_json, learning_profile=learning_profile or "", profile_message=profile_message or "",
+                generation_time_sec=generation_time_sec or 0, length_preset=length_preset,
                 analogy_preset=analogy_preset, video_duration=video_duration, notes=notes_json
             )
             db.add(guide)
@@ -321,29 +363,38 @@ def create_batch_job(
 
 
 def append_batch_log(batch_id: str, message: str, level: str = "info") -> None:
-    """배치 작업에 실시간 로그 항목을 추가합니다."""
-    with SessionLocal() as db:
-        job = db.query(BatchJob).filter(BatchJob.id == batch_id).first()
-        if not job:
-            return
-        now_str = datetime.now().isoformat()
-        try:
-            log_list = json.loads(job.logs) if job.logs else []
-        except:
+    """배치 작업에 실시간 로그 항목을 추가합니다 (동시성/예외 방어)."""
+    if not batch_id:
+        return
+    try:
+        with SessionLocal() as db:
+            job = db.query(BatchJob).filter(BatchJob.id == batch_id).first()
+            if not job:
+                return
+            now_str = datetime.now().isoformat()
             log_list = []
-            
-        log_list.append({
-            "timestamp": now_str,
-            "message": str(message),
-            "level": level
-        })
-        # 최대 최근 300개 로그 유지
-        if len(log_list) > 300:
-            log_list = log_list[-300:]
-            
-        job.logs = json.dumps(log_list, ensure_ascii=False)
-        job.updated_at = datetime.now(timezone.utc)
-        db.commit()
+            if job.logs:
+                try:
+                    loaded = json.loads(job.logs)
+                    if isinstance(loaded, list):
+                        log_list = loaded
+                except Exception:
+                    log_list = []
+                
+            log_list.append({
+                "timestamp": now_str,
+                "message": str(message or ""),
+                "level": level or "info"
+            })
+            # 최대 최근 300개 로그 유지
+            if len(log_list) > 300:
+                log_list = log_list[-300:]
+                
+            job.logs = json.dumps(log_list, ensure_ascii=False)
+            job.updated_at = datetime.now(timezone.utc)
+            db.commit()
+    except Exception as e:
+        print(f"[Batch Log Warning] Failed to append log for batch {batch_id}: {e}")
 
 def update_batch_job_status(batch_id: str, status: str = None, total: int = None, completed: int = None, failed: int = None, skipped: int = None, error: str = None, title: str = None) -> None:
     with SessionLocal() as db:
