@@ -28,9 +28,8 @@ def _should_retry_error(exception: BaseException) -> bool:
 FALLBACK_GEMINI_MODELS = [
     "gemini-3.5-flash-lite",
     "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-3.1-flash-lite",
-    "gemini-flash-lite-latest"
+    "gemini-flash-lite-latest",
+    "gemini-flash-latest"
 ]
 
 def safe_gemini_generate_content(client, model: str, contents: Any, config: Any = None, max_retries: int = 3):
@@ -93,7 +92,7 @@ def get_gemini_client(custom_api_key: Optional[str] = None):
     api_key = custom_api_key or settings.gemini_api_key or os.getenv("GEMINI_API_KEY")
     if not api_key or api_key == "여기에_GEMINI_API_키를_입력하세요":
         raise ValueError("GEMINI_API_KEY 환경 변수가 설정되지 않았습니다.")
-    return genai.Client(api_key=api_key, http_options={"timeout": 45})
+    return genai.Client(api_key=api_key, http_options={"timeout": 60000})
 
 def is_gemini_provider(provider: str = None) -> bool:
     """주어진 provider 문자열이 Gemini 계열인지 확인합니다."""
