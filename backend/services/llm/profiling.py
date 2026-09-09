@@ -8,6 +8,21 @@ from backend.services.llm.clients import (
 )
 from backend.config import settings
 
+def _normalize_openai_model(provider: str) -> str:
+    """OpenRouter 접두사 제거 및 제공자별 실제 모델명을 정규화합니다."""
+    if not provider:
+        return "gpt-4o"
+    p = str(provider).strip()
+    if p == "OpenAI (GPT-4o)":
+        return "gpt-4o"
+    if p == "cerebras/gpt-oss-120b":
+        return "gpt-oss-120b"
+    if p.startswith("openrouter/"):
+        p = p.replace("openrouter/", "", 1)
+    if p in ("openrouter", "openrouter/free", "meta-llama/llama-3.3-70b-instruct:free"):
+        return "nvidia/nemotron-3.5-lightning:free"
+    return p
+
 def generate_answer(selected_text: str, context: str, question: str, provider: str, learner_profile: str = "") -> str:
     """
     본문 컨텍스트를 바탕으로 사용자가 선택한 특정 텍스트에 대한 질문에 답변을 생성합니다.
@@ -65,11 +80,7 @@ def generate_answer(selected_text: str, context: str, question: str, provider: s
             )
             return response.choices[0].message.content
     else:
-        target_model = provider
-        if provider == "OpenAI (GPT-4o)":
-            target_model = "gpt-4o"
-        elif provider == "cerebras/gpt-oss-120b":
-            target_model = "gpt-oss-120b"
+        target_model = _normalize_openai_model(provider)
             
         try:
             client = get_openai_client(provider)
@@ -115,11 +126,7 @@ def translate_title(title: str, provider: str) -> str:
             )
             return response.text.strip().strip('"')
         else:
-            target_model = provider
-            if provider == "OpenAI (GPT-4o)":
-                target_model = "gpt-4o"
-            elif provider == "cerebras/gpt-oss-120b":
-                target_model = "gpt-oss-120b"
+            target_model = _normalize_openai_model(provider)
             
             try:
                 client = get_openai_client(provider)
@@ -166,7 +173,7 @@ def extract_image_keyword(title: str, provider: str) -> str:
             keyword = response.text.strip().replace('"', '')
             return keyword if keyword else "study"
         else:
-            target_model = "gpt-4o" if provider == "OpenAI (GPT-4o)" else provider
+            target_model = _normalize_openai_model(provider)
             try:
                 client = get_openai_client(provider)
                 response = client.chat.completions.create(
@@ -231,7 +238,7 @@ def profile_content(context_data: str, provider: str) -> dict:
         else:
             try:
                 client = get_openai_client(provider)
-                target_model = "gpt-4o-mini" if provider == "OpenAI (GPT-4o)" else provider
+                target_model = _normalize_openai_model(provider)
                 response = client.chat.completions.create(
                     model=target_model,
                     messages=[

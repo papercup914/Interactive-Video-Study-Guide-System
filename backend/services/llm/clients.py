@@ -11,12 +11,13 @@ _MAX_LLM_WORKERS = max(4, int(os.getenv("CHAPTER_GENERATION_CONCURRENCY", str(se
 _llm_executor = ThreadPoolExecutor(max_workers=_MAX_LLM_WORKERS, thread_name_prefix="llm_bounded_worker")
 
 def _should_retry_error(exception: BaseException) -> bool:
-    """인증 오류, 결제/크레딧 부족(402), 404(모델 없음), 설정 누락은 재시도하지 않고 즉시 Fallback으로 넘깁니다."""
+    """인증 오류, 결제/크레딧 부족(402), 404(모델 없음), 설정 누락, 타임아웃은 재시도하지 않고 즉시 Fallback으로 넘깁니다."""
     err_str = str(exception).lower()
     non_retry_keywords = (
         "authentication", "401", "api_key", "invalid_api_key", "incorrect api key",
         "404", "not_found", "model not found", "unsupported",
-        "402", "payment_required", "insufficient_quota", "credit_balance_exhausted", "billing"
+        "402", "payment_required", "insufficient_quota", "credit_balance_exhausted", "billing",
+        "readtimeout", "connecttimeout", "timed out", "timeout"
     )
     if any(k in err_str for k in non_retry_keywords):
         return False
@@ -37,6 +38,7 @@ def safe_gemini_generate_content(client, model: str, contents: Any, config: Any 
     Google Gemini API 호출 시:
     1) 일일 무료 할당량(RequestsPerDay)이 소진되면 다음 가용 모델(3.5-flash-lite, 3.6-flash 등)로 즉시 자동 스위칭합니다.
     2) 분당 한도(RPM) 초과 시 서버가 요구한 대기 시간 동안 대기 후 자동 재시도합니다.
+    3) 타임아웃 발생 시 현재 모델에서 무한 대기하지 않고 다음 가용 모델로 즉시 전환합니다.
     """
     target_model = model or settings.selected_gemini_version or "gemini-3.5-flash-lite"
     candidate_models = [target_model] + [m for m in FALLBACK_GEMINI_MODELS if m != target_model]
@@ -55,6 +57,11 @@ def safe_gemini_generate_content(client, model: str, contents: Any, config: Any 
                 last_err = e
                 is_quota = "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "quota" in err_str_lower
                 is_unavailable = "503" in err_str or "404" in err_str or "not_found" in err_str_lower or "unavailable" in err_str_lower or "no longer available" in err_str_lower
+                is_timeout = "timeout" in err_str_lower or "timed out" in err_str_lower or "readtimeout" in err_str_lower
+                
+                if is_timeout:
+                    print(f"[Gemini Timeout Fallback] Model '{current_model}' timed out -> Switching immediately to next candidate model...")
+                    break
                 
                 if is_quota or is_unavailable:
                     is_daily_quota = (
@@ -86,12 +93,12 @@ def get_gemini_client(custom_api_key: Optional[str] = None):
     api_key = custom_api_key or settings.gemini_api_key or os.getenv("GEMINI_API_KEY")
     if not api_key or api_key == "여기에_GEMINI_API_키를_입력하세요":
         raise ValueError("GEMINI_API_KEY 환경 변수가 설정되지 않았습니다.")
-    return genai.Client(api_key=api_key, http_options={"timeout": 60})
+    return genai.Client(api_key=api_key, http_options={"timeout": 45})
 
 def is_gemini_provider(provider: str = None) -> bool:
     """주어진 provider 문자열이 Gemini 계열인지 확인합니다."""
     p = str(provider).lower().strip() if provider else ""
-    if any(k in p for k in ("groq", "openrouter", "openai", "cerebras", "glm", "nvidia", "byok", "gpt")):
+    if any(k in p for k in ("groq", "openrouter", "openai", "cerebras", "glm", "nvidia", "byok", "gpt", ":free")):
         return False
     if not provider:
         gemini_key = settings.gemini_api_key or os.getenv("GEMINI_API_KEY")
@@ -105,7 +112,7 @@ def get_openai_client(
     provider: str = None, 
     custom_api_key: Optional[str] = None, 
     custom_base_url: Optional[str] = None,
-    timeout: float = 120.0
+    timeout: float = 60.0
 ):
     """OpenAI 호환 API 클라이언트(Groq, OpenRouter, NVIDIA NIM, Cerebras, OpenAI, BYOK)를 생성합니다."""
     api_key = custom_api_key
@@ -116,7 +123,7 @@ def get_openai_client(
         if "groq" in p_lower:
             api_key = settings.groq_api_key or os.getenv("GROQ_API_KEY")
             base_url = base_url or "https://api.groq.com/openai/v1"
-        elif "openrouter" in p_lower:
+        elif "openrouter" in p_lower or ":free" in p_lower:
             api_key = settings.openrouter_api_key or os.getenv("OPENROUTER_API_KEY")
             base_url = base_url or "https://openrouter.ai/api/v1"
         elif provider == "cerebras/gpt-oss-120b":
@@ -130,12 +137,12 @@ def get_openai_client(
         elif (settings.openai_api_key or os.getenv("OPENAI_API_KEY")) and (settings.openai_api_key or os.getenv("OPENAI_API_KEY")) != "여기에_OPENAI_API_키를_입력하세요":
             api_key = settings.openai_api_key or os.getenv("OPENAI_API_KEY")
         else:
-            if settings.groq_api_key or os.getenv("GROQ_API_KEY"):
-                api_key = settings.groq_api_key or os.getenv("GROQ_API_KEY")
-                base_url = base_url or "https://api.groq.com/openai/v1"
-            elif settings.openrouter_api_key or os.getenv("OPENROUTER_API_KEY"):
+            if settings.openrouter_api_key or os.getenv("OPENROUTER_API_KEY"):
                 api_key = settings.openrouter_api_key or os.getenv("OPENROUTER_API_KEY")
                 base_url = base_url or "https://openrouter.ai/api/v1"
+            elif settings.groq_api_key or os.getenv("GROQ_API_KEY"):
+                api_key = settings.groq_api_key or os.getenv("GROQ_API_KEY")
+                base_url = base_url or "https://api.groq.com/openai/v1"
             elif settings.nemotron_3_ultra_api_key or os.getenv("NEMOTRON_3_ULTRA_API_KEY"):
                 api_key = settings.nemotron_3_ultra_api_key or os.getenv("NEMOTRON_3_ULTRA_API_KEY")
                 base_url = base_url or "https://integrate.api.nvidia.com/v1"

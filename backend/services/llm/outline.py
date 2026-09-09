@@ -118,13 +118,29 @@ def generate_outline(
         )
         return response.text
 
-    @retry(retry=retry_if_exception(_should_retry_error), stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=30))
+    def _build_heuristic_sections(text: str, default_title: str = "학습 가이드") -> List[str]:
+        """모든 AI API 호출이 실패하거나 타임아웃되었을 때 자막 텍스트 기반으로 3~5개 챕터를 자동 생성하는 안전망."""
+        if not text or len(text.strip()) < 100:
+            return ["영상 개요 및 핵심 개념", "핵심 내용 심층 분석", "최종 요약 및 결론"]
+        
+        # 텍스트 길이에 따라 3~5개 챕터 기본 구조 생성
+        lines = [line.strip() for line in text.splitlines() if len(line.strip()) > 15]
+        first_line = lines[0][:40] if lines else default_title
+        
+        return [
+            f"도입 및 핵심 배경 ({first_line[:25]}...)",
+            "핵심 원리와 메커니즘 분석",
+            "실무 활용 전략 및 주요 사례",
+            "핵심 요약과 향후 전망"
+        ]
+
+    @retry(retry=retry_if_exception(_should_retry_error), stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1.5, min=2, max=10))
     def _call_openai_outline(target_provider="OpenAI (GPT-4o)"):
         target_model = target_provider or "OpenAI (GPT-4o)"
         p_lower = str(target_provider).lower()
         if "groq" in p_lower:
             target_model = "llama-3.3-70b-versatile"
-        elif "openrouter" in p_lower:
+        elif "openrouter" in p_lower or ":free" in p_lower:
             target_model = target_provider.replace("openrouter/", "") if "/" in target_provider else target_provider
             if target_model in ("openrouter", "openrouter/free", "meta-llama/llama-3.3-70b-instruct:free"):
                 target_model = "nvidia/nemotron-3.5-lightning:free"
@@ -137,7 +153,7 @@ def generate_outline(
         elif "nvidia" in p_lower:
             target_model = "nvidia/nemotron-3.5-lightning:free"
             
-        client = get_openai_client(target_provider, custom_api_key=custom_api_key, custom_base_url=custom_base_url, timeout=120.0)
+        client = get_openai_client(target_provider, custom_api_key=custom_api_key, custom_base_url=custom_base_url, timeout=35.0)
         
         trimmed_context = context_data
         if len(context_data) > 10000:
@@ -151,16 +167,18 @@ def generate_outline(
             )
         
         candidate_models = [target_model]
-        if "openrouter" in p_lower:
+        if "openrouter" in p_lower or ":free" in p_lower:
             for fallback_m in ("nvidia/nemotron-3.5-lightning:free", "nvidia/nemotron-3-ultra-550b-a55b:free", "nvidia/nemotron-3-super-120b-a12b:free"):
                 if fallback_m not in candidate_models:
                     candidate_models.append(fallback_m)
         
         last_error = None
         for cur_model in candidate_models:
+            # openrouter 접두사가 남아있을 경우 제거
+            clean_m = cur_model.replace("openrouter/", "") if "/" in cur_model and cur_model.startswith("openrouter/") else cur_model
             try:
                 response = client.chat.completions.create(
-                    model=cur_model,
+                    model=clean_m,
                     messages=[
                         {"role": "system", "content": prompt + "\n반드시 JSON 형식 ({\"sections\": [\"챕터1\", \"챕터2\", ...]})으로만 출력해줘."},
                         {"role": "user", "content": f"다음은 영상 스크립트 내용입니다:\n\n{trimmed_context}"}
@@ -172,7 +190,7 @@ def generate_outline(
                 last_error = e
                 try:
                     response = client.chat.completions.create(
-                        model=cur_model,
+                        model=clean_m,
                         messages=[
                             {"role": "system", "content": prompt + "\n반드시 마크다운 코드블록 없이 순수 JSON 형식 ({\"sections\": [\"챕터1\", \"챕터2\", ...]})으로만 출력해줘."},
                             {"role": "user", "content": f"다음은 영상 스크립트 내용입니다:\n\n{trimmed_context}"}
@@ -181,16 +199,17 @@ def generate_outline(
                     return response.choices[0].message.content
                 except Exception as inner_e:
                     last_error = inner_e
-                    print(f"[Warning] Outline generation failed on {cur_model}: {inner_e}. Trying fallback model if available...")
+                    print(f"[Warning] Outline generation failed on {clean_m}: {inner_e}. Trying fallback model if available...")
                     continue
                     
         raise last_error
 
+    outline_raw = "{}"
     if is_gemini_provider(provider):
         try:
             outline_raw = _call_gemini_outline()
         except Exception as e:
-            print(f"[Harness Fallback] Gemini failed outline generation: {e}. Switching to Fallback.")
+            print(f"[Harness Fallback] Gemini failed outline generation: {e}. Switching to OpenAI.")
             try:
                 outline_raw = _call_openai_outline(provider or "OpenAI (GPT-4o)")
             except Exception as e2:
@@ -201,7 +220,11 @@ def generate_outline(
             outline_raw = _call_openai_outline(provider)
         except Exception as e:
             print(f"[Harness Fallback] OpenAI outline failed: {e}. Switching to Gemini Fallback.")
-            outline_raw = _call_gemini_outline()
+            try:
+                outline_raw = _call_gemini_outline()
+            except Exception as e2:
+                print(f"[Harness Error] Both OpenAI and Gemini outline failed: {e2}")
+                outline_raw = "{}"
         
     try:
         parsed_json = json.loads(outline_raw)
@@ -216,7 +239,8 @@ def generate_outline(
             sections.append(clean_line)
             
     if not sections:
-        sections = ["전체 내용 요약"]
+        print("[Outline Fallback] AI outline generation yielded no valid sections. Triggering Smart Heuristic Outline...")
+        sections = _build_heuristic_sections(context_data)
     else:
         conclusion_keywords = ("결론", "마무리", "총평", "끝마치며", "마치며", "최종 요약")
         intro_keywords = ("도입", "개요", "시작", "소개", "오프닝", "시작하며", "프롤로그")

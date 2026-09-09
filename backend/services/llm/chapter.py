@@ -211,13 +211,13 @@ async def async_generate_chapter_content(
             )
             return response.text
 
-    @retry(retry=retry_if_exception(_should_retry_error), stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=30))
+    @retry(retry=retry_if_exception(_should_retry_error), stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1.5, min=2, max=10))
     def _call_openai_with_retry(target_provider="OpenAI (GPT-4o)"):
         target_model = target_provider or "OpenAI (GPT-4o)"
         p_lower = str(target_provider).lower()
         if "groq" in p_lower:
             target_model = "llama-3.3-70b-versatile"
-        elif "openrouter" in p_lower:
+        elif "openrouter" in p_lower or ":free" in p_lower:
             target_model = target_provider.replace("openrouter/", "") if "/" in target_provider else target_provider
             if target_model in ("openrouter", "openrouter/free", "meta-llama/llama-3.3-70b-instruct:free"):
                 target_model = "nvidia/nemotron-3.5-lightning:free"
@@ -230,18 +230,19 @@ async def async_generate_chapter_content(
         elif "nvidia" in p_lower:
             target_model = "nvidia/nemotron-3.5-lightning:free"
             
-        client = get_openai_client(target_provider, custom_api_key=custom_api_key, custom_base_url=custom_base_url, timeout=120.0)
+        client = get_openai_client(target_provider, custom_api_key=custom_api_key, custom_base_url=custom_base_url, timeout=90.0)
         candidate_models = [target_model]
-        if "openrouter" in p_lower:
+        if "openrouter" in p_lower or ":free" in p_lower:
             for fallback_m in ("nvidia/nemotron-3.5-lightning:free", "nvidia/nemotron-3-ultra-550b-a55b:free", "nvidia/nemotron-3-super-120b-a12b:free"):
                 if fallback_m not in candidate_models:
                     candidate_models.append(fallback_m)
             
         last_error = None
         for cur_model in candidate_models:
+            clean_m = cur_model.replace("openrouter/", "") if "/" in cur_model and cur_model.startswith("openrouter/") else cur_model
             try:
                 response = client.chat.completions.create(
-                    model=cur_model,
+                    model=clean_m,
                     messages=[
                         {"role": "system", "content": current_system_prompt},
                         {"role": "user", "content": current_user_instruction}
@@ -250,7 +251,7 @@ async def async_generate_chapter_content(
                 return response.choices[0].message.content
             except Exception as e:
                 last_error = e
-                print(f"[Warning] Chapter generation failed on {cur_model}: {e}. Trying fallback model if available...")
+                print(f"[Warning] Chapter generation failed on {clean_m}: {e}. Trying fallback model if available...")
                 continue
                 
         raise last_error
@@ -260,9 +261,9 @@ async def async_generate_chapter_content(
             try:
                 return _call_gemini_with_retry()
             except Exception as e:
-                print(f"[Harness Fallback] Gemini failed after retries: {e}. Switching to Fallback model (GPT-4o).")
+                print(f"[Harness Fallback] Gemini failed after retries: {e}. Switching to Fallback model (OpenAI).")
                 try:
-                    return _call_openai_with_retry("OpenAI (GPT-4o)")
+                    return _call_openai_with_retry(provider or "OpenAI (GPT-4o)")
                 except Exception as e2:
                     print(f"[Harness Error] Both Gemini and OpenAI chapter generation failed: {e2}")
                     raise e
@@ -271,7 +272,11 @@ async def async_generate_chapter_content(
                 return _call_openai_with_retry(provider)
             except Exception as e:
                 print(f"[Harness Fallback] OpenAI failed after retries: {e}. Switching to Fallback model (Gemini).")
-                return _call_gemini_with_retry()
+                try:
+                    return _call_gemini_with_retry()
+                except Exception as e2:
+                    print(f"[Harness Error] Both OpenAI and Gemini chapter generation failed: {e2}")
+                    raise e
 
     try:
         result = await asyncio.wait_for(loop.run_in_executor(_llm_executor, _call_api), timeout=120.0)
