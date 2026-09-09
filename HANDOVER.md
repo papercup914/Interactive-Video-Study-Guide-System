@@ -128,11 +128,76 @@
      - `clean_invalid_cached_chapters`로 기존 비한국어 캐시 파일 2건 전수 삭제 완료.
 - **Notion 리포트**: [📄 [Bug Report] 외국어 유튜브 영상 챕터 본문 한국어 미번역 이슈](https://app.notion.com/p/Bug-Report-In-Progress-3d0a8db03fbe818da58bffbe102c94f1) (`In Progress`)
 
+### 13) [아키텍처 전면 개편] 백엔드 단일 책임 원칙(SRP) 준수 및 관심사별 7대 모듈 분리 리팩토링 (Completed)
+- **배경 및 문제점**: `backend/services/llm.py`가 1,336줄의 God Object로 비대화되어 클라이언트 통신, 캐시, 검증, 프롬프트 파싱, 음성 처리, 목차 및 챕터 생성 로직이 단일 파일에 강결합되어 유지보수성 저하 및 버그 추적 곤란.
+- **해결 조치**:
+  1. [`backend/services/llm/`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/llm): 관심사별 7개 전용 모듈로 완벽 분리:
+     - `clients.py`: Google GenAI, OpenAI, OpenRouter 클라이언트 및 프로필 관리
+     - `cache.py`: 파일 기반 챕터 캐시 읽기/쓰기 및 손상 캐시 정제
+     - `validators.py`: 챕터 서술형 본문 유효성 검증 (1,000자 이상, 한글 150자 이상, 인사말 금지)
+     - `audio.py`: 오디오 기반 목차 생성 및 음성 전사 폴백
+     - `outline.py`: 비디오 메타데이터 및 스마트 샘플링 기반 목차 설계
+     - `chapter.py`: 단일/다중 챕터 비동기 생성 및 에스컬레이션 재시도
+     - `profiling.py`: LLM 응답 시간 및 토큰/비용 프로파일링
+  2. [`backend/services/llm.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/llm.py): 상위 호환 파사드(Facade) 패턴을 적용하여 기존 외부 호출부 수정 없이 100% 하위 호환성 보장.
+  3. **[런타임 크래시 버그 수정]**: `llm.py` 768행 부근 `section_index`, `total_sections` 미정의로 인해 다중 섹션 영상 처리 시 발생하던 치명적인 `NameError` 크래시 원천 차단.
+  4. [`backend/config.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/config.py): `settings` 싱글톤 일원화 (`main.py`, `celery_app.py` 중복 설정 제거).
+  5. [`backend/schemas/guide.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/schemas/guide.py): Pydantic DTO 도입 및 `job_manager.py` 방어 로직 강화.
+
+### 14) [성능 & 가독성 개선] 프론트엔드 상세 뷰어(1,643줄 -> 420줄) 8대 컴포넌트 모듈화 및 렌더링 최적화 (Completed)
+- **배경 및 문제점**: `frontend/src/app/guide/[jobId]/page.tsx`가 1,643줄 단일 거대 컴포넌트로 구성되어, 타임스탬프 클릭이나 동영상 재생 등 사소한 상태 변경에도 전체 챕터와 수식, 텍스트가 통째로 Re-render되어 심각한 화면 버벅임 발생.
+- **해결 조치**:
+  1. [`frontend/src/app/guide/[jobId]/components/`](file:///i:/Interactive%20Video%20Study%20Guide%20System/frontend/src/app/guide/%5BjobId%5D/components): 8대 독립 컴포넌트로 분리:
+     - `ChapterItem`: 개별 챕터 렌더링 및 메모이제이션 (불필요한 리렌더링 차단)
+     - `VideoPanel`: 유튜브 영상 플레이어 및 타임스탬프 동기화
+     - `OptionsToolbar`: 요약 분량, 설명 방식, 몰입 읽기 모드 전환 툴바
+     - `SummaryInsightCard`: 영상 핵심 요약 및 주요 챕터 뱃지 카드
+     - `FloatingToolbar`: 텍스트 드래그 시 노트/AI 질문 컨텍스트 메뉴
+     - `NoteModals`: 개인 학습 노트 작성/수정/삭제 모달
+     - `RSVPModal`: 고속 텍스트 리더(RSVP) 팝업 모달
+     - `ViewerPresetMatrixModal`: 3x3 프리셋 매트릭스 탐색기 모달
+  2. `page.tsx` 코드 라인 수를 **1,643줄에서 420줄로 74% 이상 압축**하여 가독성과 유지보수성 극대화.
+  3. `useCallback` 적용으로 자식 컴포넌트에 전달되는 이벤트 핸들러 참조 고정.
+  4. [`frontend/src/lib/markdownProcessor.ts`](file:///i:/Interactive%20Video%20Study%20Guide%20System/frontend/src/lib/markdownProcessor.ts): 텍스트 해시 기반 LRU 캐시 최적화로 마크다운 파싱 지연 해소.
+  5. [`backend/constants/presets.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/constants/presets.py) & [`frontend/src/lib/presets.ts`](file:///i:/Interactive%20Video%20Study%20Guide%20System/frontend/src/lib/presets.ts): 프론트-백엔드 간 프리셋 상수 및 라벨 매핑 완벽 동기화.
+  6. **검증**: `npm run build` (Turbopack, TypeScript 무결점) 100% 빌드 성공 (에러 0건).
+
+### 15) [인프라 & 배포] AWS EC2 최신 Docker 빌드 배포 및 Vercel 리버스 프록시 실서비스 연동 완료 (Completed)
+- **배경 및 내용**: 대규모 리팩토링 및 런타임 버그 수정본을 프로덕션 인프라(AWS EC2 & Vercel)에 무중단 반영.
+- **조치 내역**:
+  1. **AWS EC2 환경 정리 및 최신 코드 갱신**:
+     - EC2 내 중복 클론 폴더(`Interactive-Video-Study-Guide-System/`) 정리 및 변경 스크립트 복원(`git checkout`).
+     - `git pull origin main`으로 최신 백엔드 모듈 코드 갱신.
+  2. **Docker 컨테이너 3종 최신 빌드 및 배포 (`./scripts/deploy_backend.sh`)**:
+     - `studyguide-backend:latest` 경량 단일 이미지 성공적 빌드.
+     - `studyguide-redis` (Healthy), `studyguide-celery` (Started), `studyguide-fastapi` (Started) 3종 컨테이너 정상 가동.
+     - `curl -I http://localhost:8000/docs` ➔ `HTTP/1.1 200 OK` 정상 헬스체크 검증 완료.
+  3. **Vercel 프로덕션 리버스 프록시 연동**:
+     - Vercel 대시보드 `Environment Variables`에서 `BACKEND_API_URL`을 AWS EC2 퍼블릭 IP(`http://<EC2-IP>:8000`)로 설정 완료.
+     - 최신 환경 변수를 반영하여 Vercel Production 재배포(Redeploy) 성공.
+     - HTTPS(Vercel)와 HTTP(AWS EC2) 간 Mixed Content 차단 문제를 Next.js Server-side Rewrites를 통해 원천 해결.
+
+### 16) [버그 해결] Vercel 프로덕션 가이드 생성 ReadTimeout 및 404/400 연쇄 실패 이슈 해결 (In Progress)
+- **배경 및 문제점**: Vercel 프로덕션 실서비스 E2E 테스트 중 "목차 구조 설계 중..." 단계에서 `RetryError[<Future ... raised ReadTimeout>]` 에러와 함께 가이드 생성 실패 발생.
+- **원인 분석**:
+  1. `backend/services/llm/profiling.py`: 모델명에 `openrouter/` 접두사가 포함된 채 OpenRouter API로 전송되어 `400 Bad Request` 발생.
+  2. `backend/services/llm/clients.py`: `get_openai_client`가 `:free` 모델임에도 불구하고 `nvidia` 키워드만 보고 `integrate.api.nvidia.com` 엔드포인트로 잘못 라우팅하여 NVIDIA 공식 API에서 `404 Not Found` 발생.
+  3. EC2 백엔드 `backend/.env`에 `GEMINI_API_KEY` 미동기화 및 구버전 레이어 타임아웃 발생 시, tenacity 5회 재시도 루프로 인해 5분 이상 대기 후 `RetryError` 크래시 발생.
+  4. AI 목차 설계 실패 시 자막 단락 기반 최후 휴리스틱 Fallback 부재.
+- **해결 조치**:
+  1. [`backend/services/llm/clients.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/llm/clients.py): `:free` 또는 `openrouter` 포함 시 항상 OpenRouter(`https://openrouter.ai/api/v1`)로 정확히 라우팅, `_should_retry_error`에서 타임아웃 즉시 Fallback 전환 가드레일 적용.
+  2. [`backend/services/llm/profiling.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/llm/profiling.py): `_normalize_openai_model` 도입으로 `openrouter/` 접두사 자동 정제.
+  3. [`backend/services/llm/outline.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/llm/outline.py): 목차 타임아웃 35초 단축, Gemini Fallback 양방향 try-except 완전 격리, 최후의 스마트 휴리스틱 목차 생성(`_build_heuristic_sections`) 탑재.
+  4. **AWS EC2 환경변수 동기화 및 Docker 최신 빌드 배포**: EC2 `backend/.env`에 `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_API_KEY` 동기화 후 컨테이너 3종 최신 배포 완료 (`HTTP 200 OK`).
+  5. **엔드투엔드 목차 생성 검증**: EC2 Celery 내부에서 `nvidia/nemotron-3.5-lightning:free` 모델로 40초 만에 5개 챕터 목차 100% 정상 생성 검증 완료.
+- **Notion 리포트**: [📄 [Bug Report] Vercel 프로덕션 가이드 생성 ReadTimeout 및 404 재발 이슈](https://app.notion.com/p/Bug-Report-Vercel-ReadTimeout-404-In-Progress-3d6a8db03fbe812ca614c95f59e6d4a0) (`In Progress`)
+
 ---
 
 ## 3. Notion 문서 관리 현황
 
 1. **[공식 이슈 보드] [📋 Interactive Video Study Guide System 이슈 리포트 (통합 대시보드)](https://app.notion.com/p/3cba8db03fbe80a7972be85c1b2c2202)**:
+   - 📄 [[Bug Report] Vercel 프로덕션 가이드 생성 ReadTimeout 및 404 재발 이슈](https://app.notion.com/p/Bug-Report-Vercel-ReadTimeout-404-In-Progress-3d6a8db03fbe812ca614c95f59e6d4a0) (`In Progress` - 모델 라우팅 정규화, 타임아웃 Fallback, 스마트 휴리스틱 탑재 및 EC2 배포 완료, 사용자 실서비스 재검증 대기)
    - 📄 [[Bug Report] 외국어 유튜브 영상 챕터 본문 한국어 미번역 이슈](https://app.notion.com/p/Bug-Report-In-Progress-3d0a8db03fbe818da58bffbe102c94f1) (`In Progress` - 프롬프트 전면 개편 및 한글 글자수 검증 가드레일 탑재, 사용자 재검증 대기)
    - 📄 [[Bug Report] 배포 후 학습 서재 가이드 목록 일시적 미노출 이슈](https://app.notion.com/p/Bug-Report-Resolved-3d0a8db03fbe81619bf2d560a0641e8a) (`Resolved` - 사용자 최종 검증 완료)
    - 📄 [[Bug Report] 가이드 생성 시작 시 ReadTimeout 및 404 발생 이슈](https://app.notion.com/p/Bug-Report-ReadTimeout-404-Resolved-3d0a8db03fbe811ca6d4f8527e3ee3fc) (`Resolved` - 사용자 최종 검증 완료)
@@ -162,21 +227,23 @@ cd "I:\Interactive Video Study Guide System\frontend"
 npm run dev
 ```
 
-### AWS EC2 운영 백엔드 업데이트
+### AWS EC2 운영 백엔드 업데이트 (배포 스크립트 실행)
 ```bash
 cd ~/Interactive-Video-Study-Guide-System
 git pull origin main
-docker compose up -d
+chmod +x scripts/deploy_backend.sh
+./scripts/deploy_backend.sh
 ```
 
 ---
 
 ## 5. 다음 대화에서 이어서 진행할 수 있는 과제
 
-1. **외국어 영상 한국어 번역 가이드 생성 실서비스 검증**:
-   - AWS EC2에 `git pull origin main && docker compose up -d` 배포 후, 영어 유튜브 영상을 입력하여 챕터 서술형 본문 전체가 유창한 한국어로 생성되는지 사용자 최종 확인.
-   - 사용자 확인 후 Notion 신규 이슈(`외국어 유튜브 영상 챕터 본문 한국어 미번역 이슈`)를 `Resolved`로 전환.
-2. **Vercel Web Analytics 대시보드 트래픽 모니터링**:
+1. **Vercel 프로덕션 환경에서 실서비스 최종 End-to-End 검증**:
+   - Vercel 배포 URL(`https://interactive-video-study-guide-syste.vercel.app`)로 접속하여 임의의 유튜브 영상 URL로 가이드 생성 및 챕터 열람이 정상 작동하는지 E2E 점검.
+2. **외국어 영상 한국어 번역 가이드 생성 실서비스 검증**:
+   - 영어 유튜브 영상을 입력하여 챕터 서술형 본문 전체가 유창한 한국어로 생성되는지 최종 확인 후 Notion 이슈 상태 업데이트.
+3. **Vercel Web Analytics 대시보드 트래픽 모니터링**:
    - Vercel Analytics 활성화 후 실사용자 접속 및 페이지뷰 데이터 수집 추이 확인.
 
 
