@@ -59,10 +59,11 @@ async def startup_event():
 
     async def _bg_cache_cleanup():
         try:
-            from backend.services.llm import clean_invalid_cached_chapters
-            cleaned = await asyncio.to_thread(clean_invalid_cached_chapters)
-            if cleaned > 0:
-                print(f"[Startup Background] Purged {cleaned} invalid/non-narrative cached chapters.")
+            from backend.services.llm import clean_invalid_cached_chapters, clean_invalid_cached_outlines
+            cleaned_ch = await asyncio.to_thread(clean_invalid_cached_chapters)
+            cleaned_out = await asyncio.to_thread(clean_invalid_cached_outlines)
+            if cleaned_ch > 0 or cleaned_out > 0:
+                print(f"[Startup Background] Purged {cleaned_ch} invalid chapters and {cleaned_out} corrupted outline caches.")
         except Exception as e:
             print(f"[Startup Warning] Failed background cache integrity check: {e}")
 

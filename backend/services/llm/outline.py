@@ -31,8 +31,38 @@ def generate_outline(
     preset_suffix = "summary" if length_preset == "핵심 요약" else ("normal" if length_preset == "적당한 설명" else "detailed")
     cache_file = os.path.join("backend/data", f"{url_hash}_outline_{preset_suffix}.json")
     if not force_refresh and os.path.exists(cache_file):
-        with open(cache_file, "r", encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with open(cache_file, "r", encoding="utf-8") as f:
+                cached_sections = json.load(f)
+            
+            is_corrupted = False
+            if not isinstance(cached_sections, list) or len(cached_sections) == 0:
+                is_corrupted = True
+            else:
+                corrupted_keywords = ["그래서 오늘 저희", "마운틴뷰", "본사", "시스템 아키텍처와 전체 워크플로우"]
+                for s in cached_sections:
+                    if not isinstance(s, str) or "(" in s or ")" in s or any(kw in s for kw in corrupted_keywords):
+                        is_corrupted = True
+                        break
+                
+                # 원본 타임스탬프 챕터가 3개 이상 제공되었는데 캐시된 챕터 수가 일치하지 않는 경우
+                if video_chapters and len(video_chapters) >= 3 and len(cached_sections) != len(video_chapters):
+                    is_corrupted = True
+                    
+            if is_corrupted:
+                print(f"[Outline Cache Invalidation] Corrupted or outdated outline cache found ({cache_file}). Purging and regenerating...")
+                try:
+                    os.remove(cache_file)
+                except Exception:
+                    pass
+            else:
+                return cached_sections
+        except Exception as cache_err:
+            print(f"[Outline Cache] Failed to load {cache_file}: {cache_err}. Purging and regenerating...")
+            try:
+                os.remove(cache_file)
+            except Exception:
+                pass
 
     char_count = len(context_data)
     

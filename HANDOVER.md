@@ -282,7 +282,28 @@
   4. **AWS EC2 운영 서버 배포 및 실시간 E2E 검증 완료**:
      - Paul Graham 실제 영상(`5bxp78i96S8`) 대상 Celery 컨테이너 실시간 검증 완료:
        - 훅 타이틀: `[예비 창업가 필독] 창업하기 전에 먼저 봐야 할 것 - 폴 그레이엄이 말하는 위대한 창업가의 조건`
-       - 챕터 목차 (7개): `21년 동안 YC가 지켜본 창업의 본질`, `왜 지금 창업자들은 더 거대한 꿈을 꾸는가?`, `왜 성공 창업자들은 두려울 정도로 거대한 아이디어를 선택할까?`, `돈보다 창업자를 움직이는 진짜 동력은 무엇인가?`, `위대한 창업자를 압도적으로 강하게 만드는 자질`, `폴 그레이엄도 놀란 AI의 예측 불가능한 변화`, `YC는 어떻게 시작됐고, 21년 뒤에도 무엇이 변하지 않았나?`
+### 21) [버그 해결] 디스크 목차 캐시 오염으로 인한 구버전 휴리스틱 문장('(그래서 오늘 저희...') 재발 이슈 완전 해결 (In Progress)
+- **배경 및 문제점**:
+  - Vercel 프로덕션에서 Paul Graham 영상(`5bxp78i96S8`)에 대해 가이드를 새로 생성했으나, 제목은 BZCF 스타일로 잘 뽑혔는데 챕터 목차 및 본문 서두에 다시 `(그래서 오늘 저희 는 마운틴뷰 에 있는 본사 ...)`라는 구버전 비상 안전망 문장이 출력됨.
+- **원인 분석**:
+  1. `backend/services/llm/outline.py`의 `generate_outline` 함수는 `{url_hash}_outline_{preset_suffix}.json` 캐시 파일이 디스크에 존재하면 AI 생성을 거치지 않고 캐시 파일을 그대로 반환함.
+  2. 이전 비상 안전망 발동 시절(9월 10일 03:23)에 서버 디스크에 생성되었던 `d3a8925f70dfe1764cade35568816059_outline_detailed.json` 파일이 그대로 남아있었음.
+  3. 캐시 파일 내에 구버전 오염 키워드나 괄호 잡음이 있는지 검증하는 가드레일이 없어, 새로 배포된 BZCF 질문형 챕터 큐레이션 및 AI 목차 설계 코드가 실행조차 되지 못하고 오염된 캐시 파일의 4개 챕터가 그대로 로드됨.
+  4. 그 결과, 1번 챕터 제목 자체가 `도입 및 핵심 배경 (그래서 오늘 저희 는 마운틴뷰 에 있는 본사 ...)`로 들어가며 본문 및 위젯에 잡음 문장이 노출됨.
+- **해결 조치**:
+  1. [`backend/services/llm/outline.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/llm/outline.py):
+     - `generate_outline` 캐시 로드 시 엄격한 무결성 검증 가드레일 탑재:
+       - 챕터 제목에 `(` 또는 `)` 또는 오염 키워드(`그래서 오늘 저희`, `마운틴뷰`, `본사` 등)가 포함된 경우 즉시 오염 캐시로 판정하고 `os.remove` 후 자동 재생성.
+       - 원본 타임스탬프 챕터가 3개 이상 제공되었는데 캐시된 챕터 수가 불일치하는 경우에도 캐시 무효화 및 자동 재생성.
+  2. [`backend/services/llm/cache.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/llm/cache.py):
+     - `clean_invalid_cached_outlines` 함수 구현: 서버 디스크 내 모든 `*_outline_*.json` 파일을 전수 스캔하여 잡음 문장이나 구버전 휴리스틱이 포함된 캐시 파일을 일괄 영구 삭제.
+  3. [`backend/main.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/main.py):
+     - 서버 기동 시 백그라운드 태스크로 `clean_invalid_cached_outlines` 자동 실행.
+  4. [`backend/services/tasks.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/tasks.py):
+     - 목차 취득 후 2중 안전 가드레일 탑재 (`re.sub(r'\(.*?\)', '', s).strip()`)로 혹시 모를 괄호 잡음 잔존 가능성을 원천 차단.
+  5. **AWS EC2 오염 캐시 파일 즉시 파기 및 배포 완료**:
+     - `d3a8925f70dfe1764cade35568816059_outline_*.json` 즉시 삭제 완료.
+- **Notion 리포트**: [📄 [Bug Report] 목차 디스크 캐시 오염으로 인한 구버전 휴리스틱 문장 재발 이슈](https://app.notion.com/p/3e0a8db03fbe81369527f30df93605c3) (`In Progress`)
 
 ---
 

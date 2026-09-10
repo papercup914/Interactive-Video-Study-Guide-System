@@ -259,6 +259,15 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
             custom_base_url
         )
         
+        # 2중 안전 가드레일: 목차 제목에 괄호나 잡음이 남아있을 경우 완전 소거
+        cleaned_sections = []
+        for s in sections:
+            cs = re.sub(r'\(.*?\)', '', s).strip()
+            if cs:
+                cleaned_sections.append(cs)
+        if cleaned_sections:
+            sections = cleaned_sections
+            
         document = {}
         total_sections = len(sections)
         

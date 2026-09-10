@@ -81,3 +81,51 @@ def clean_invalid_cached_chapters(data_dir: Optional[str] = None) -> int:
                 print(f"[Cache Invalidation Warning] Error processing cache file '{fname}': {e}")
                 
     return removed_count
+
+def clean_invalid_cached_outlines(data_dir: Optional[str] = None) -> int:
+    """
+    기존 목차 캐시(*_outline_*.json)를 전수 스캔하여, 괄호 잡음이나 
+    레거시 휴리스틱 문장이 포함된 오염된 목차 캐시 파일을 자동 영구 삭제합니다.
+    """
+    base_dir = data_dir or os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    candidate_dirs = [
+        os.path.join(base_dir, "data"),
+        os.path.join(base_dir, "backend", "data")
+    ]
+    
+    removed_count = 0
+    corrupted_keywords = ["그래서 오늘 저희", "마운틴뷰", "본사", "시스템 아키텍처와 전체 워크플로우"]
+    
+    for c_dir in candidate_dirs:
+        if not os.path.exists(c_dir):
+            continue
+        for fname in os.listdir(c_dir):
+            if not fname.endswith(".json") or "_outline_" not in fname:
+                continue
+            fpath = os.path.join(c_dir, fname)
+            try:
+                import json
+                with open(fpath, "r", encoding="utf-8") as f:
+                    sections = json.load(f)
+                
+                is_corrupted = False
+                if not isinstance(sections, list) or len(sections) == 0:
+                    is_corrupted = True
+                else:
+                    for s in sections:
+                        if not isinstance(s, str):
+                            is_corrupted = True
+                            break
+                        # 괄호 포함 또는 오염 키워드 포함 검사
+                        if "(" in s or ")" in s or any(kw in s for kw in corrupted_keywords):
+                            is_corrupted = True
+                            break
+                
+                if is_corrupted:
+                    print(f"[Outline Cache Invalidation] Deleting corrupted outline cache: {fpath}")
+                    os.remove(fpath)
+                    removed_count += 1
+            except Exception as e:
+                print(f"[Outline Cache Invalidation] Error checking {fpath}: {e}")
+                
+    return removed_count
