@@ -152,7 +152,11 @@ def translate_title(title: str, provider: str, context_text: str = "") -> str:
                     if response and response.choices and len(response.choices) > 0:
                         content = response.choices[0].message.content or ""
                         if content.strip():
-                            return content.strip().strip('"')
+                            lines = [line.strip().strip('"*# ') for line in content.strip().splitlines() if line.strip()]
+                            badge_lines = [l for l in lines if l.startswith("[") and "]" in l]
+                            if badge_lines:
+                                return badge_lines[-1]
+                            return lines[-1]
                 except Exception:
                     continue
             return title
