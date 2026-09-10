@@ -161,7 +161,13 @@ def generate_outline(
         
         candidate_models = [target_model]
         if "openrouter" in p_lower or ":free" in p_lower:
-            for fallback_m in ("nvidia/nemotron-3.5-lightning:free", "nvidia/nemotron-3-ultra-550b-a55b:free", "meta-llama/llama-3.3-70b-instruct:free"):
+            for fallback_m in (
+                "google/gemma-4-31b-it:free",
+                "google/gemma-4-26b-a4b-it:free",
+                "nvidia/nemotron-3.5-lightning:free",
+                "nex-agi/nex-n2.5-pro:free",
+                "nvidia/nemotron-3-ultra-550b-a55b:free"
+            ):
                 if fallback_m not in candidate_models:
                     candidate_models.append(fallback_m)
         

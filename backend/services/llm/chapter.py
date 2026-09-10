@@ -233,7 +233,13 @@ async def async_generate_chapter_content(
         client = get_openai_client(target_provider, custom_api_key=custom_api_key, custom_base_url=custom_base_url, timeout=25.0)
         candidate_models = [target_model]
         if "openrouter" in p_lower or ":free" in p_lower:
-            for fallback_m in ("nvidia/nemotron-3.5-lightning:free", "nvidia/nemotron-3-ultra-550b-a55b:free", "meta-llama/llama-3.3-70b-instruct:free"):
+            for fallback_m in (
+                "google/gemma-4-31b-it:free",
+                "google/gemma-4-26b-a4b-it:free",
+                "nvidia/nemotron-3.5-lightning:free",
+                "nex-agi/nex-n2.5-pro:free",
+                "nvidia/nemotron-3-ultra-550b-a55b:free"
+            ):
                 if fallback_m not in candidate_models:
                     candidate_models.append(fallback_m)
             
@@ -248,16 +254,18 @@ async def async_generate_chapter_content(
                         {"role": "user", "content": current_user_instruction}
                     ]
                 )
-                if response and response.choices and len(response.choices) > 0 and response.choices[0].message and response.choices[0].message.content:
-                    return response.choices[0].message.content
-                else:
-                    raise ValueError(f"Empty or malformed completion response from {clean_m}")
+                if response and response.choices and len(response.choices) > 0:
+                    text_out = response.choices[0].message.content or ""
+                    if text_out.strip():
+                        return text_out
+                print(f"[Warning] Chapter generation failed on {clean_m}: Empty or malformed completion response from {clean_m}. Trying fallback model if available...")
             except Exception as e:
                 last_error = e
                 print(f"[Warning] Chapter generation failed on {clean_m}: {e}. Trying fallback model if available...")
                 continue
-                
-        raise last_error
+        if last_error:
+            raise last_error
+        raise RuntimeError(f"All candidate models failed for {target_provider}.")
 
     used_heuristic = False
 
@@ -275,30 +283,37 @@ async def async_generate_chapter_content(
         clean_title = re.sub(r'\(.*?\)', '', section_title).strip() or section_title
         clean_title = re.sub(r'^[0-9]+[\.\s\-]+', '', clean_title).strip() or clean_title
         
-        extracted_body = "\n\n".join(clean_sentences[:12]) if clean_sentences else f"**{clean_title}**의 주요 내용과 핵심 메커니즘을 상세히 다룹니다."
+        extracted_body = "\n\n".join(clean_sentences[:15]) if clean_sentences else f"**{clean_title}**의 주요 내용과 핵심 메커니즘을 상세히 다룹니다."
         
         return (
             f"## {section_title}\n\n"
             f"**{clean_title}**의 핵심 개념과 주요 동작 원리를 체계적으로 분석하고 정리합니다.\n\n"
             f"### 1. 도입 및 핵심 배경\n"
-            f"{clean_title}은 시스템 아키텍처와 전체 워크플로우에서 매우 중요한 역할을 담당합니다. "
-            f"이 개념을 정확히 이해하면 복잡한 데이터 흐름과 로직을 명확하게 파악할 수 있으며, 실무 구현 시 발생할 수 있는 잠재적 문제를 사전에 방지할 수 있습니다. "
-            f"기본기부터 심화 응용 단계까지 차근차근 점검하는 것이 안정적인 서비스 구축의 초석이 됩니다.\n\n"
+            f"{clean_title} 분야는 시스템 아키텍처와 전체 워크플로우에서 매우 중요한 역할을 담당합니다. "
+            f"이 개념을 정확히 이해하면 복잡한 데이터 흐름과 비즈니스 로직을 명확하게 파악할 수 있으며, 실제 실무 구현 시 발생할 수 있는 잠재적 문제를 사전에 방지할 수 있습니다. "
+            f"기본기부터 심화 응용 단계까지 차근차근 점검하는 것이 안정적인 서비스 구축과 효율적인 엔지니어링의 초석이 됩니다. "
+            f"특히 초기 설계 단계에서 요구사항을 면밀히 분석하고 각 모듈 간의 상호작용을 체계화하는 것이 전체 완성도를 좌우합니다.\n\n"
             f"### 2. 세부 메커니즘 및 상세 해설\n"
             f"{extracted_body}\n\n"
-            f"각 단계별 처리 과정은 유기적으로 연결되어 있으며, 입력 데이터의 정합성을 보장하면서 목적한 결과를 효율적으로 도출하도록 설계되어 있습니다. "
-            f"특히 예외 상황 발생 시의 롤백 메커니즘과 상태 보존 정책을 함께 고려하면 시스템의 전반적인 내결함성(Fault Tolerance)을 비약적으로 향상시킬 수 있습니다.\n\n"
+            f"각 단계별 처리 과정은 유기적으로 연결되어 있으며, 입력 데이터의 정합성을 보장하면서 목적한 결과를 효율적으로 도출하도록 정교하게 설계되어 있습니다. "
+            f"특히 예외 상황 발생 시의 롤백 메커니즘과 상태 보존 정책을 함께 고려하면 시스템의 전반적인 내결함성(Fault Tolerance)을 비약적으로 향상시킬 수 있습니다. "
+            f"이러한 메커니즘을 실제 환경에 적용할 때는 병목 구간을 지속적으로 프로파일링하고, 캐싱 계층과 비동기 메시지 큐를 적절히 배치하여 처리량을 극대화해야 합니다.\n\n"
+            f"### 3. 실무 엔지니어링 패턴 및 확장 전략\n"
+            f"현업 시스템에서 대규모 트래픽이나 복잡한 워크플로우를 다룰 때는 다음과 같은 모범 사례를 적용하는 것이 필수적입니다:\n"
+            f"1. **멱등성(Idempotency) 보장**: 네트워크 재시도나 중복 요청이 발생하더라도 상태가 왜곡되지 않도록 고유 요청 식별자를 관리합니다.\n"
+            f"2. **단계별 격리(Isolation)**: 하나의 컴포넌트에서 오류가 발생하더라도 전체 서비스로 장애가 전파되지 않도록 서킷 브레이커 패턴을 적용합니다.\n"
+            f"3. **가시성(Observability) 확보**: 구조화된 로그와 지표 메트릭을 수집하여 이상 징후를 실시간으로 모니터링합니다.\n\n"
             f"> **💡 핵심 인사이트**\n"
-            f"> {section_title}의 본질은 복잡성을 캡슐화하고 신뢰성 높은 인터페이스를 제공하는 데 있습니다. "
+            f"> {clean_title}의 본질은 복잡성을 캡슐화하고 신뢰성 높은 인터페이스를 제공하는 데 있습니다. "
             f"> 개별 구성 요소 간의 결합도를 낮추고 응집도를 극대화하여 유지보수성과 확장성을 동시에 확보하는 것이 성공적인 아키텍처의 핵심입니다.\n\n"
-            f"### 3. 실무 적용 팁 & 주의사항\n"
+            f"### 4. 실무 적용 팁 & 주의사항\n"
             f"- 실무 환경에 적용하기 전에 입력 데이터의 유효성과 예외 경계 조건을 반드시 사전에 검증하십시오.\n"
             f"- 성능 병목 현상을 방지하기 위해 비동기 처리 파이프라인 및 캐싱 전략을 적극적으로 도입하는 것이 권장됩니다.\n"
             f"- 모니터링 로그와 메트릭 지표를 사전에 정의하여 런타임 이상 징후를 조기에 감지하십시오.\n\n"
             f"<quiz>\n"
-            f'{{"question": "{section_title}을 실무에 도입할 때 가장 우선적으로 고려해야 할 사항은 무엇인가요?", '
+            f'{{"question": "{clean_title}을 실무에 도입할 때 가장 우선적으로 고려해야 할 사항은 무엇인가요?", '
             f'"options": ["입력 데이터 유효성 및 경계 조건 검증", "코드 라인 수 무조건 단축", "예외 처리 생략", "모든 로직을 동기식으로 단일 처리"], '
-            f'"answer": 0, "explanation": "{section_title}의 안정성을 보장하기 위해서는 입력 데이터 검증과 사전 경계 조건 파악이 가장 중요합니다."}}\n'
+            f'"answer": 0, "explanation": "{clean_title}의 안정성을 보장하기 위해서는 입력 데이터 검증과 사전 경계 조건 파악이 가장 중요합니다."}}\n'
             f"</quiz>"
         )
 
