@@ -265,12 +265,31 @@
        - 잡음 키워드 잔존 0건 (`Found bad keywords: []`).
        - 불필요한 메타데이터 전면 차단 및 표준 학습 가이드 본문 100% 정상 출력 검증 완료.
 
+### 20) [UX/콘텐츠 큐레이션] BZCF 스타일 타깃 훅 타이틀 및 질문/인사이트형 챕터 큐레이션 시스템 탑재 (Completed)
+- **배경 및 문제점**:
+  - 기존 가이드 생성이 단순 기계적 직역("Paul Graham On Startups, Ambition..." -> "스타트업, 야망, 그리고 위대한 창업자에 대한 폴 그레이엄")이나 무미건조한 기본 목차("핵심 원리와 메커니즘 분석")로 시작되어 학습자의 관심 유발과 영상 본질 파악이 어려움.
+  - 인기 번역/큐레이션 채널(BZCF 등)처럼 **[타깃 독자 뱃지] 직관적 훅 타이틀 - 부제** 형식과, **질문형/인사이트형(Benefit 중심)** 챕터 목차 구성 요구.
+- **해결 조치**:
+  1. [`backend/services/tasks.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/tasks.py):
+     - `extract_chapters_from_scraped_text`: 유튜브 스크랩 텍스트 내 타임스탬프 챕터(`[00:00] — 21 Years of YC`) 자동 복원 및 목차 생성기 연동.
+     - `translate_title` 호출 시 영상 자막/설명란 문맥을 전달하여 본질을 꿰뚫는 제목 추출.
+  2. [`backend/services/llm/profiling.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/llm/profiling.py):
+     - BZCF 썸네일 스타일 프롬프트 설계: `[타깃 독자] 직관적 훅 제목 - 영상 원제 기반 부제` (예: `[예비 창업가 필독] 창업하기 전에 먼저 봐야 할 것 - 폴 그레이엄이 말하는 위대한 창업가의 조건`).
+  3. [`backend/services/llm/outline.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/llm/outline.py):
+     - 질문형/인사이트형 챕터 각색 프롬프트 탑재: 원본 타임스탬프 목차를 독자의 궁금증을 자극하는 매력적인 질문/통찰형 한국어 제목으로 변환.
+     - 도메인 감지 지능형 안전망(`_build_heuristic_sections`): 비즈니스/스타트업, 개발/기술, 일반 교양 분야를 자동 감지하여 최적화된 맞춤형 4개 챕터 제공.
+     - 챕터 번호 제거 시 의미 있는 숫자(예: '21년') 보존을 위한 정규식 정제 적용.
+  4. **AWS EC2 운영 서버 배포 및 실시간 E2E 검증 완료**:
+     - Paul Graham 실제 영상(`5bxp78i96S8`) 대상 Celery 컨테이너 실시간 검증 완료:
+       - 훅 타이틀: `[예비 창업가 필독] 창업하기 전에 먼저 봐야 할 것 - 폴 그레이엄이 말하는 위대한 창업가의 조건`
+       - 챕터 목차 (7개): `21년 동안 YC가 지켜본 창업의 본질`, `왜 지금 창업자들은 더 거대한 꿈을 꾸는가?`, `왜 성공 창업자들은 두려울 정도로 거대한 아이디어를 선택할까?`, `돈보다 창업자를 움직이는 진짜 동력은 무엇인가?`, `위대한 창업자를 압도적으로 강하게 만드는 자질`, `폴 그레이엄도 놀란 AI의 예측 불가능한 변화`, `YC는 어떻게 시작됐고, 21년 뒤에도 무엇이 변하지 않았나?`
+
 ---
 
 ## 3. Notion 문서 관리 현황
 
 1. **[공식 이슈 보드] [📋 Interactive Video Study Guide System 이슈 리포트 (통합 대시보드)](https://app.notion.com/p/3cba8db03fbe80a7972be85c1b2c2202)**:
-   - 📄 [[Bug Report] Vercel 프로덕션 가이드 생성 ReadTimeout 및 404 이슈 종합 해결](https://app.notion.com/p/Bug-Report-Vercel-ReadTimeout-404-In-Progress-3d6a8db03fbe812ca614c95f59e6d4a0) (`In Progress` - GenAI ms 단위 보정, 챕터 타임아웃 최적화, Heuristic Chapter Fallback 탑재 및 EC2 배포 완료, 사용자 실서비스 재검증 대기)
+   - 📄 [[Bug Report] Vercel 프로덕션 가이드 생성 ReadTimeout 및 404 이슈 종합 해결](https://app.notion.com/p/Bug-Report-Vercel-ReadTimeout-404-Resolved-3d6a8db03fbe812ca614c95f59e6d4a0) (`Resolved` - 사용자 최종 검증 및 공식 해결 완료)
    - 📄 [[Bug Report] 외국어 유튜브 영상 챕터 본문 한국어 미번역 이슈](https://app.notion.com/p/Bug-Report-In-Progress-3d0a8db03fbe818da58bffbe102c94f1) (`In Progress` - 프롬프트 전면 개편 및 한글 글자수 검증 가드레일 탑재, 사용자 재검증 대기)
    - 📄 [[Bug Report] 배포 후 학습 서재 가이드 목록 일시적 미노출 이슈](https://app.notion.com/p/Bug-Report-Resolved-3d0a8db03fbe81619bf2d560a0641e8a) (`Resolved` - 사용자 최종 검증 완료)
    - 📄 [[Bug Report] 가이드 생성 시작 시 ReadTimeout 및 404 발생 이슈](https://app.notion.com/p/Bug-Report-ReadTimeout-404-Resolved-3d0a8db03fbe811ca6d4f8527e3ee3fc) (`Resolved` - 사용자 최종 검증 완료)

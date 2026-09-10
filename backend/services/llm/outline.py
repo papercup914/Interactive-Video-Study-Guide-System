@@ -268,7 +268,7 @@ def generate_outline(
         raw_sections = []
         
     for line in raw_sections:
-        clean_line = line.strip().lstrip('1234567890.-*# ')
+        clean_line = re.sub(r'^\s*(?:\d+[\.\-\)\:]\s*|[\*\#\-\s]+)', '', line).strip()
         if clean_line:
             sections.append(clean_line)
             
