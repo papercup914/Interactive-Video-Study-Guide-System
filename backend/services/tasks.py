@@ -154,7 +154,21 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
                 raw_title = metadata["title"]
                 video_duration = metadata.get("duration", 0)
                 video_chapters = metadata.get("chapters")
-            elif not raw_title:
+            
+            if not raw_title or raw_title in ("제목 알 수 없음", "유튜브 학습 가이드"):
+                try:
+                    import requests
+                    o_url = f"https://www.youtube.com/oembed?url={canonical_url}&format=json"
+                    res = requests.get(o_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+                    if res.status_code == 200:
+                        otitle = res.json().get("title")
+                        if otitle:
+                            raw_title = otitle
+                            print(f"[Tasks] Direct oEmbed fallback acquired video title: {raw_title}")
+                except Exception as oe_err:
+                    print(f"[Tasks] Direct oEmbed fallback failed: {oe_err}")
+
+            if not raw_title:
                 raw_title = "유튜브 학습 가이드"
 
             # 2. 자막(Transcript) 추출 (Innertube 모바일 API -> 쿠키 세션 -> 기본 세션 -> yt-dlp)

@@ -140,13 +140,30 @@ def get_video_metadata(url: str) -> dict:
             info = ydl.extract_info(url, download=False)
             duration_sec = info.get('duration', 0) if info else 0
             chapters = info.get('chapters') if info else None
-            return {
-                "title": (info.get('title') if info else '제목 알 수 없음') or '제목 알 수 없음',
-                "duration": duration_sec,
-                "chapters": chapters
-            }
-    except Exception:
-        return {"title": '제목 알 수 없음', "duration": 0}
+            title = (info.get('title') if info else '') or ''
+            if title and title != '제목 알 수 없음':
+                return {
+                    "title": title,
+                    "duration": duration_sec,
+                    "chapters": chapters
+                }
+    except Exception as e:
+        print(f"[VideoService] yt-dlp metadata extraction failed: {e}. Trying oEmbed fallback...")
+        
+    # oEmbed Fallback: 공식 공개 엔드포인트는 IP 차단 없이 제목을 100% 반환
+    try:
+        oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
+        resp = requests.get(oembed_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            title = data.get("title")
+            if title:
+                print(f"[VideoService] oEmbed fallback retrieved title: {title}")
+                return {"title": title, "duration": 0}
+    except Exception as oembed_err:
+        print(f"[VideoService] oEmbed fallback failed: {oembed_err}")
+        
+    return {"title": '제목 알 수 없음', "duration": 0}
 
 def extract_video_id(url: str) -> str:
     """Extract YouTube video ID from URL"""

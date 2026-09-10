@@ -232,22 +232,28 @@ async def async_generate_chapter_content(
             
         client = get_openai_client(target_provider, custom_api_key=custom_api_key, custom_base_url=custom_base_url, timeout=25.0)
         candidate_models = [target_model]
-        if "openrouter" in p_lower or ":free" in p_lower:
-            for fallback_m in (
-                "google/gemma-4-26b-a4b-it:free",
-                "nex-agi/nex-n2.5-pro:free",
-                "nex-agi/nex-n2.5-mini:free",
-                "nvidia/nemotron-3.5-lightning:free",
-                "google/gemma-4-31b-it:free"
-            ):
-                if fallback_m not in candidate_models:
-                    candidate_models.append(fallback_m)
+        # OpenRouter 무료 고성능 모델들을 항상 백업 폴백으로 대기
+        for fallback_m in (
+            "google/gemma-4-26b-a4b-it:free",
+            "nex-agi/nex-n2.5-pro:free",
+            "nex-agi/nex-n2.5-mini:free",
+            "nvidia/nemotron-3.5-lightning:free",
+            "google/gemma-4-31b-it:free"
+        ):
+            if fallback_m not in candidate_models:
+                candidate_models.append(fallback_m)
             
         last_error = None
         for cur_model in candidate_models:
             clean_m = cur_model.replace("openrouter/", "") if "/" in cur_model and cur_model.startswith("openrouter/") else cur_model
+            # 모델 슬러그에 따라 OpenRouter 엔드포인트 자동 격리 라우팅
+            if ":free" in cur_model or "openrouter" in cur_model:
+                cur_client = get_openai_client("openrouter", custom_api_key=custom_api_key, custom_base_url=custom_base_url, timeout=25.0)
+            else:
+                cur_client = client
+                
             try:
-                response = client.chat.completions.create(
+                response = cur_client.chat.completions.create(
                     model=clean_m,
                     messages=[
                         {"role": "system", "content": current_system_prompt},

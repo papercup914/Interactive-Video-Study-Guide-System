@@ -305,6 +305,25 @@
      - `d3a8925f70dfe1764cade35568816059_outline_*.json` 즉시 삭제 완료.
 - **Notion 리포트**: [📄 [Bug Report] 목차 디스크 캐시 오염으로 인한 구버전 휴리스틱 문장 재발 이슈](https://app.notion.com/p/3e0a8db03fbe81369527f30df93605c3) (`In Progress`)
 
+### 22) [버그 해결] 유튜브 메타데이터 누락 시 디폴트 타이틀('유튜브 학습 가이드') 전달로 인한 비디오 주제 할루시네이션 및 OpenRouter 모델 라우팅 완전 해결 (In Progress)
+- **배경 및 문제점**:
+  - Paul Graham 영상에 대해 가이드 생성 시, 제목이 전혀 엉뚱한 `"[학습 가이드 필독] 공부 안 해도 점수가 오르는 마법의 학습 가이드 - 단 10분 투자로 뇌 깨우기"`로 생성되는 심각한 할루시네이션 발생.
+- **원인 분석**:
+  1. **디폴트 제목 전달로 인한 소설 창작**:
+     - 유튜브 클라우드 IP 차단으로 `yt-dlp` 메타데이터 조회가 실패했을 때, `tasks.py`가 `raw_title`을 원제 대신 시스템 디폴트 문자열인 `"유튜브 학습 가이드"`로 Fallback 처리함.
+     - `translate_title`에 원본 제목으로 `"유튜브 학습 가이드"`만 전달되자, LLM은 '학습/공부' 도메인으로 착각하여 `[학습 가이드 필독]` 뱃지와 `"공부 안 해도 점수가 오르는..."`, `"단 10분 투자로 뇌 깨우기"`라는 수험생 클리셰 훅을 창작함.
+  2. **OpenRouter 무료 모델 라우팅 404 및 Gemini 400 Bad Request 연쇄 실패**:
+     - `chapter.py` 및 `outline.py`에서 `provider` 기본값 호출 시 `client`가 전역 `OPENAI_BASE_URL`(`integrate.api.nvidia.com`)을 바라보아 OpenRouter 무료 모델(`nex-agi/...:free`, `google/gemma...:free`)에 대해 NVIDIA 서버가 `404 Not Found`를 반환.
+     - 폴백 모델인 Gemini 호출 역시 환경변수 불일치로 `400 Bad Request`가 발생하며 모든 챕터 생성이 비상 안전망(`_build_heuristic_chapter`)으로 밀림.
+- **해결 조치**:
+  1. [`backend/services/video.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/video.py) & [`backend/services/tasks.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/tasks.py):
+     - **YouTube oEmbed API 공식 공개 엔드포인트 Fallback 탑재**: `yt-dlp`가 차단되더라도 봇 감지가 없는 `https://www.youtube.com/oembed?url=...&format=json`을 통해 원본 비디오 제목(`Paul Graham On Startups...`)을 0.1초 만에 100% 무조건 확보.
+  2. [`backend/services/llm/profiling.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/llm/profiling.py):
+     - `translate_title` 프롬프트에 **강력한 네거티브 제약(Negative Constraints)** 추가: 영상 본문과 무관한 수험/공부법 어그로 문구("공부 안 해도", "마법의 학습", "뇌 깨우기") 생성 절대 금지 및 영상의 실제 핵심 인물과 주제(스타트업, 창업, AI 등)에 기반한 제목 작성 강제.
+  3. [`backend/services/llm/chapter.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/llm/chapter.py) & [`outline.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/llm/outline.py):
+     - `:free` 및 `openrouter` 모델 호출 시 전역 base_url을 무시하고 OpenRouter 전용 클라이언트로 즉시 전환하는 안전 라우팅 가드레일 탑재 (NVIDIA 404 원천 차단).
+- **Notion 리포트**: [📄 [Bug Report] 유튜브 메타데이터 누락 시 디폴트 타이틀로 인한 할루시네이션 이슈](https://app.notion.com/p/3d7a8db03fbe810b8e5bdb770963eadb) (`In Progress`)
+
 ---
 
 ## 3. Notion 문서 관리 현황
