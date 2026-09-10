@@ -38,7 +38,14 @@ export function cleanAndNormalizeMarkdown(sectionName: string, text: string): st
   // 0-2. 본문 서두 챕터 제목 중복 줄 제거
   if (sectionName) {
     const escaped = sectionName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    processed = processed.trim().replace(new RegExp(`^\\s*(?:#{1,4}\\s*)?(?:\\d+\\.\\s*)?${escaped}\\s*\\n+`, 'i'), '');
+    const cleanSectionName = sectionName.replace(/^\d+[\.\s\-]+/, '').trim();
+    const escapedClean = cleanSectionName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    // 번호가 포함된 원본 제목 및 번호가 제거된 순수 제목 중복 헤더 제거
+    processed = processed.trim().replace(new RegExp(`^\\s*(?:#{1,4}\\s*)?(?:\\d+\\.\\s*)?(?:${escaped}|${escapedClean})\\s*\\n+`, 'i'), '');
+    
+    // 기계적 서두 요약 문장 제거 (예: "**도입...**의 핵심 개념과 주요 동작 원리를 체계적으로 분석하고 정리합니다.")
+    processed = processed.replace(new RegExp(`^\\s*(?:\\*\\*)?(?:${escaped}|${escapedClean})(?:\\*\\*)?의\\s*핵심\\s*개념과\\s*주요\\s*동작\\s*원리를\\s*체계적으로\\s*분석하고\\s*정리합니다\\.[\\s\\n]*`, 'i'), '');
   }
 
   // 첫 줄이 제목 형태인 경우 보존하며 두 번째 줄 이하의 인사말 블록 제거

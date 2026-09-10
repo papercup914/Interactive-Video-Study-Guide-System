@@ -690,24 +690,19 @@ export default function GuideViewer({ params }: { params: Promise<{ jobId: strin
                 itemContent={(idx, section) => (
                   <div className="px-4 md:px-6 py-4 md:py-6 w-full max-w-full">
                     <div className="bg-surface border border-border-subtle rounded-xl p-inner-padding shadow-sm mb-6 w-full">
-                      <h2 className="font-headline-md text-headline-md text-text-primary mb-4 flex items-center gap-2">
-                        <span className="text-primary-container">{idx + 1}.</span> {section}
-                      </h2>
-                      <div className="font-body-sm text-body-sm text-muted-foreground">
-                        <ChapterItem 
-                          key={section}
-                          idx={idx}
-                          section={section}
-                          content={document[section]}
-                          notes={notes}
-                          setSelectedNote={setSelectedNote}
-                          setSelectedCluster={setSelectedCluster}
-                          getProcessedMarkdown={getProcessedMarkdown}
-                          jobId={jobId}
-                          openRSVP={handleOpenRSVP}
-                          isInteractiveMode={isInteractiveMode}
-                        />
-                      </div>
+                      <ChapterItem 
+                        key={section}
+                        idx={idx}
+                        section={section}
+                        content={document[section]}
+                        notes={notes}
+                        setSelectedNote={setSelectedNote}
+                        setSelectedCluster={setSelectedCluster}
+                        getProcessedMarkdown={getProcessedMarkdown}
+                        jobId={jobId}
+                        openRSVP={handleOpenRSVP}
+                        isInteractiveMode={isInteractiveMode}
+                      />
                     </div>
                   </div>
                 )}
