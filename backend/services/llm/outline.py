@@ -70,11 +70,17 @@ def generate_outline(
 
     if is_valid_chapters:
         prompt = f"""
-        유튜브 영상의 공식 챕터 정보가 주어집니다.
-        다음 공식 챕터 제목들을 학습용 목차에 맞게 자연스럽고 명확한 한국어로 번역 및 정제해주세요.
-        원래의 챕터 개수와 시간적 순서(Time Sequence)를 100% 엄격하게 동일하게 유지해야 합니다.
+        당신은 100만 지식 큐레이션 채널(예: BZCF 등)의 수석 콘텐츠 기획자입니다.
+        유튜브 영상의 원작자가 등록한 공식 챕터 정보가 주어집니다.
+        이 공식 챕터들을 독자가 흥미를 느끼고 핵심 교훈(Benefit)을 직관적으로 파악할 수 있도록
+        감칠맛 나는 한국어 질문형/통찰형 챕터 제목으로 번역 및 각색해주세요.
         
-        - [중요] 각 목차 항목은 번호나 기호 없이 새로운 줄에 순수 한국어 제목만 하나씩 작성해줘.
+        [작성 규칙]
+        - 단순한 직역 대신, 시청자가 해당 파트에서 얻어갈 수 있는 '핵심 질문(Why/How)'이나 '인사이트'가 드러나도록 매력적으로 작성하세요.
+          (예: "Why Today's Startups Are More Ambitious" -> "왜 지금 세대의 스타트업은 더 거대해졌는가?")
+          (예: "What Actually Motivates Founders" -> "돈이 아닌 '이것'에 미친 사람만 창업해야 하는 이유")
+        - 원래의 챕터 개수와 시간적 순서(Time Sequence)를 100% 엄격하게 동일하게 유지해야 합니다.
+        - 각 목차 항목은 번호나 기호 없이 새로운 줄에 순수 한국어 제목만 하나씩 작성해줘.
         
         공식 챕터 제목:
         {chapter_text}
@@ -83,13 +89,19 @@ def generate_outline(
         context_data = f"[영상 배경 및 내용 요약 발췌]\n{script_snippet}" if script_snippet else "영상 컨텍스트"
     else:
         prompt = f"""
+        당신은 100만 지식 큐레이션 채널(예: BZCF 등)의 수석 콘텐츠 기획자입니다.
         주어진 내용(오디오 또는 스크립트)을 분석하여 학습용 목차(Outline)를 작성해줘.
         {outline_instruction}
         - [🚨 최우선 절대 준수: 시간 순서(Time Sequence) 엄격 유지]
-          반드시 영상의 시작(도입/개요)부터 중간(핵심 내용/원리/실습), 끝(결론/마무리/전망) 순서대로 시간 흐름에 맞게 나열해야 합니다.
+          반드시 영상의 시작(도입/배경)부터 중간(핵심 내용/원리/실습), 끝(결론/마무리/전망) 순서대로 시간 흐름에 맞게 나열해야 합니다.
           절대로 '결론'이나 '마무리'가 1번이나 앞부분에 오거나, '도입'이나 '개요'가 뒷부분에 오는 역순(Inversion)으로 작성하지 마십시오!
+        - [직관적 훅 챕터 지침]:
+          '핵심 원리와 메커니즘 분석', '시스템 아키텍처' 같은 무미건조한 공학적 표현을 일괄 적용하지 마십시오.
+          영상의 성격(비즈니스, 스타트업, 인문, 라이프, 기술 등)에 완벽히 맞추어, 
+          독자의 지적 호기심을 자극하고 실질적 통찰을 제공하는 생생한 질문형/메시지형 챕터 제목을 작성하세요.
+          (예: "비즈니스 모델의 3대 성공 공식", "위대한 파운더를 만드는 단 1가지 조건", "실전에 즉시 적용하는 4단계 액션 플랜")
         - [중요] 원본 스크립트가 외국어(영어 등)이더라도, 각 목차 항목의 제목은 반드시 자연스럽고 명확한 한국어로 번역하여 작성하세요.
-        - 각 목차 항목은 번호나 기호 없이 새로운 줄에 순수 한국어 제목만 하나씩 작성해줘. (예: 대형 언어 모델의 생태계와 작동 원리)
+        - 각 목차 항목은 번호나 기호 없이 새로운 줄에 순수 한국어 제목만 하나씩 작성해줘.
         """
     
     class OutlineSchema(BaseModel):
@@ -119,12 +131,35 @@ def generate_outline(
         return response.text
 
     def _build_heuristic_sections(text: str, default_title: str = "학습 가이드") -> List[str]:
-        """모든 AI API 호출이 실패하거나 타임아웃되었을 때 깔끔한 4개 표준 챕터를 자동 생성하는 안전망."""
+        """모든 AI API 호출이 실패하거나 타임아웃되었을 때 도메인 맞춤형 4개 표준 챕터를 자동 생성하는 지능형 안전망."""
+        combined_text = (default_title + " " + (text[:1000] if text else "")).lower()
+        
+        # 1. 비즈니스 / 스타트업 / 마케팅 / 인터뷰 / 에세이 계열 감지
+        biz_keywords = ["startup", "스타트업", "창업", "사업", "founder", "ambition", "vc", "yc", "투자", "비즈니스", "마케팅", "ceo", "경영", "돈", "성공", "인터뷰", "이야기", "철학"]
+        if any(kw in combined_text for kw in biz_keywords):
+            return [
+                "도입: 왜 지금 이 주제에 주목해야 하는가?",
+                "흔히 오해하는 착각과 실패 원인",
+                "성공을 가르는 결정적 조건과 핵심 통찰",
+                "실전 적용: 당장 실천해야 할 핵심 전략"
+            ]
+            
+        # 2. 기술 / 프로그래밍 / 개발 / 아키텍처 계열 감지
+        tech_keywords = ["docker", "python", "api", "code", "개발", "코드", "서버", "아키텍처", "데이터", "프레임워크", "알고리즘", "인프라", "llm", "ai 모델"]
+        if any(kw in combined_text for kw in tech_keywords):
+            return [
+                "시스템 도입 배경과 핵심 아키텍처",
+                "핵심 동작 메커니즘과 데이터 흐름",
+                "실무 구현 전략 및 장애 방지 가이드",
+                "최종 점검과 성능 최적화 체크리스트"
+            ]
+            
+        # 3. 일반 교양 / 인문 / 라이프스타일 / 기타 보편형
         return [
-            "도입 및 핵심 배경",
-            "핵심 원리와 메커니즘 분석",
-            "실무 활용 전략 및 주요 사례",
-            "핵심 요약과 향후 전망"
+            "도입: 본질을 꿰뚫는 핵심 질문",
+            "심층 분석과 새로운 시각",
+            "일상과 실무를 바꾸는 실천 팁",
+            "핵심 요약과 미래 통찰"
         ]
 
     @retry(retry=retry_if_exception(_should_retry_error), stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1.5, min=2, max=10))
@@ -136,7 +171,7 @@ def generate_outline(
         elif "openrouter" in p_lower or ":free" in p_lower:
             target_model = target_provider.replace("openrouter/", "") if "/" in target_provider else target_provider
             if target_model in ("openrouter", "openrouter/free", "meta-llama/llama-3.3-70b-instruct:free"):
-                target_model = "nvidia/nemotron-3.5-lightning:free"
+                target_model = "google/gemma-4-26b-a4b-it:free"
         elif target_provider == "OpenAI (GPT-4o)":
             target_model = "gpt-4o"
         elif target_provider == "cerebras/gpt-oss-120b":

@@ -20,7 +20,7 @@ def _normalize_openai_model(provider: str) -> str:
     if p.startswith("openrouter/"):
         p = p.replace("openrouter/", "", 1)
     if p in ("openrouter", "openrouter/free", "meta-llama/llama-3.3-70b-instruct:free"):
-        return "nvidia/nemotron-3.5-lightning:free"
+        return "google/gemma-4-26b-a4b-it:free"
     return p
 
 def generate_answer(selected_text: str, context: str, question: str, provider: str, learner_profile: str = "") -> str:
@@ -102,18 +102,24 @@ def generate_answer(selected_text: str, context: str, question: str, provider: s
             )
             return response.text
 
-def translate_title(title: str, provider: str) -> str:
+def translate_title(title: str, provider: str, context_text: str = "") -> str:
     """
-    원본 영상의 제목이 외국어인 경우 한국어로 적절히 번역합니다.
-    이미 한국어인 경우 원본을 그대로 반환합니다.
+    원본 영상의 제목과 맥락을 분석하여 BZCF 스타일의 [타깃 뱃지] + 직관적 훅 타이틀을 생성합니다.
     """
+    context_snippet = f"\n영상 내용/설명 발췌:\n{context_text[:500]}" if context_text else ""
     prompt = f"""
-    당신은 전문 번역가입니다. 다음 유튜브 영상 제목을 확인하고, 
-    만약 제목이 한국어가 아니라면(영어 등 외국어라면) 가장 자연스러운 한국어로 번역해주세요.
-    이미 한국어거나 한국어가 주로 포함되어 있다면 원본을 그대로 출력하세요.
-    다른 군더더기 말 없이 오직 "최종 제목" 텍스트만 출력하세요.
-    
-    원본 제목: "{title}"
+    당신은 100만 구독자를 보유한 탑티어 지식 큐레이션 채널(예: BZCF 등)의 메인 에디터이자 베스트셀러 출판 기획자입니다.
+    주어진 유튜브 영상의 제목과 맥락을 분석하여, 학습자가 당장 열어보고 싶도록 직관적이고 매력적인 한국어 학습 가이드 대표 제목을 작성해주세요.
+
+    [작성 규칙]
+    1. [타깃 뱃지]: 이 영상의 핵심 내용을 가장 필요로 하는 대상 독자(예: [예비 창업가 필독], [개발자 필독], [직장인/기획자 필수], [AI 입문자 추천] 등)를 맨 앞에 대괄호로 지정하세요.
+    2. 직관적 훅 제목: 딱딱한 직역이나 학술 용어 대신, 독자의 핵심 호기심과 고민을 정조준하는 직관적이고 강력한 제목(예: "사업하고 싶으면 이거 끝까지 봐야함", "돈 벌고 싶으면 스타트업 하지 마라", "코드 한 줄 없이 시스템 설계하는 법")을 만드세요.
+    3. 명확한 부제: 하이픈(-) 뒤에 영상의 핵심 인물이나 핵심 주제를 덧붙이세요.
+    4. 최종 출력 형태는 오직 다음 한 줄만 출력해야 합니다:
+       [타깃 뱃지] 직관적 훅 제목 - 부제
+    5. 따옴표나 기타 설명, 서론 없이 오직 최종 제목 한 줄만 출력하세요.
+
+    원본 제목: "{title}"{context_snippet}
     """
     model_id = settings.selected_gemini_version or "gemini-3.5-flash-lite"
     try:
@@ -127,25 +133,29 @@ def translate_title(title: str, provider: str) -> str:
             return response.text.strip().strip('"')
         else:
             target_model = _normalize_openai_model(provider)
+            candidate_models = [target_model]
+            for m in ("google/gemma-4-26b-a4b-it:free", "nex-agi/nex-n2.5-pro:free", "nvidia/nemotron-3.5-lightning:free"):
+                if m not in candidate_models:
+                    candidate_models.append(m)
             
-            try:
-                client = get_openai_client(provider)
-                response = client.chat.completions.create(
-                    model=target_model,
-                    messages=[
-                        {"role": "system", "content": "오직 번역된 제목 텍스트만 반환합니다."},
-                        {"role": "user", "content": prompt}
-                    ]
-                )
-                return response.choices[0].message.content.strip().strip('"')
-            except Exception:
-                client = get_gemini_client()
-                response = safe_gemini_generate_content(
-                    client=client,
-                    model=model_id,
-                    contents=[prompt]
-                )
-                return response.text.strip().strip('"')
+            client = get_openai_client(provider)
+            for cur_m in candidate_models:
+                try:
+                    response = client.chat.completions.create(
+                        model=cur_m,
+                        messages=[
+                            {"role": "system", "content": "오직 [타깃 뱃지] 직관적 훅 제목 - 부제 한 줄만 출력합니다."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        timeout=15.0
+                    )
+                    if response and response.choices and len(response.choices) > 0:
+                        content = response.choices[0].message.content or ""
+                        if content.strip():
+                            return content.strip().strip('"')
+                except Exception:
+                    continue
+            return title
     except Exception as e:
         print(f"Title translation failed: {str(e)}")
         return title

@@ -5,6 +5,27 @@ import uuid
 import re
 from backend.celery_app import celery_app
 
+def extract_chapters_from_scraped_text(text: str) -> list | None:
+    """스크랩된 텍스트(Jina Reader 등)에서 유튜브 타임스탬프 챕터를 파싱하여 반환합니다."""
+    if not text:
+        return None
+    chapters = []
+    pattern = re.compile(r'(?:\[?(\d{1,2}:\d{2}(?::\d{2})?)\]?(?:\([^)]+\))?)\s*[-—–:]?\s*([^\n\r]+)')
+    for line in text.splitlines():
+        line_clean = line.strip()
+        if not re.search(r'\b\d{1,2}:\d{2}\b', line_clean) or line_clean.startswith(('![', '[![')):
+            continue
+        match = pattern.search(line_clean)
+        if match:
+            time_str = match.group(1).strip()
+            ch_title = match.group(2).strip()
+            ch_title = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', ch_title).strip("—–-: ").strip()
+            if ch_title and len(ch_title) >= 3 and not ch_title.lower().startswith(('image', 'http', 'www', 'views')):
+                parts = [int(p) for p in time_str.split(':')]
+                seconds = parts[0] * 60 + parts[1] if len(parts) == 2 else parts[0] * 3600 + parts[1] * 60 + parts[2]
+                chapters.append({"title": ch_title, "start_time": seconds})
+    return chapters if len(chapters) >= 3 else None
+
 def clean_youtube_scraped_text(text: str) -> str:
     """Jina Reader 등으로 긁어온 유튜브 웹페이지 마크다운 텍스트에서 불필요한 UI 잡음, 추천 영상 목록 등을 정제합니다."""
     if not text:
@@ -163,6 +184,14 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
                         # 유튜브 웹페이지 메타데이터 잡음(조회수, UI 버튼, 추천 영상 등) 정제
                         cleaned_jina = clean_youtube_scraped_text(jina_text)
                         transcript = cleaned_jina if len(cleaned_jina) >= 300 else jina_text
+                        
+                        # 공식 챕터 정보가 없는 경우 Jina 스크랩 텍스트에서 타임스탬프 챕터 복원
+                        if not video_chapters:
+                            scraped_ch = extract_chapters_from_scraped_text(jina_text)
+                            if scraped_ch:
+                                video_chapters = scraped_ch
+                                print(f"[Tasks] Jina 스크랩 텍스트에서 {len(video_chapters)}개의 타임스탬프 챕터 추출 성공!")
+                                
                         if not raw_title or raw_title == "제목 알 수 없음" or raw_title == "유튜브 학습 가이드":
                             raw_title = jina_title
                     except Exception as jina_err:
@@ -316,7 +345,7 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
             return
         
         if not file_paths:
-            translated_title = await loop.run_in_executor(None, translate_title, raw_title, provider)
+            translated_title = await loop.run_in_executor(None, translate_title, raw_title, provider, transcript)
         else:
             translated_title = raw_title
         
