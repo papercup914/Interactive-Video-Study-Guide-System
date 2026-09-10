@@ -234,11 +234,11 @@ async def async_generate_chapter_content(
         candidate_models = [target_model]
         if "openrouter" in p_lower or ":free" in p_lower:
             for fallback_m in (
-                "google/gemma-4-31b-it:free",
                 "google/gemma-4-26b-a4b-it:free",
-                "nvidia/nemotron-3.5-lightning:free",
                 "nex-agi/nex-n2.5-pro:free",
-                "nvidia/nemotron-3-ultra-550b-a55b:free"
+                "nex-agi/nex-n2.5-mini:free",
+                "nvidia/nemotron-3.5-lightning:free",
+                "google/gemma-4-31b-it:free"
             ):
                 if fallback_m not in candidate_models:
                     candidate_models.append(fallback_m)
@@ -274,16 +274,48 @@ async def async_generate_chapter_content(
         used_heuristic = True
         print(f"[Heuristic Chapter Fallback] Generating robust heuristic narrative for '{section_title}'...")
         snippet = chunked_context if isinstance(chunked_context, str) and not chunked_context.startswith("GEMINI_FILE_URI::") else ""
+        
+        # 웹페이지 스크랩 찌꺼기, 유튜브 UI 및 메타데이터 잡음 필터링 패턴
+        junk_patterns = [
+            r"%[0-9a-fA-F]{2}",  # URL encoding artifacts (%2C, %2F 등)
+            r"https?://", r"www\.", r"\.com", r"\.org", r"redirect\?", r"watch\?v=",
+            r"\bviews\b", r"\bago\b", r"조회수", r"구독", r"좋아요", r"\bSubscribe\b",
+            r"\bUnmute\b", r"\bplayback\b", r"Follow along", r"\btranscript\b", r"\bNaN\b",
+            r"\bChapters\b", r"Skip navigation", r"Search with your voice", r"Sign in",
+            r"Copy link", r"Tap to unmute", r"Image \d+", r"!\[Image", r"### \[",
+            r"^\d{1,2}:\d{2}", r"\b\d{1,2}:\d{2}\b", r"^\s*-\s*$", r"Y Combinator",
+            r"Vivian Shen", r"Paul Graham"
+        ]
+        junk_regex = re.compile("|".join(junk_patterns), re.IGNORECASE)
+
         clean_sentences = []
         for line in snippet.split("\n"):
             line_str = line.strip()
-            if len(line_str) > 20 and not line_str.startswith(("#", "[", "http", "www")):
-                clean_sentences.append(line_str)
+            if len(line_str) < 30 or len(line_str) > 350:
+                continue
+            if line_str.startswith(("#", "[", "http", "www", "!", "%", "@", "-", "*")):
+                continue
+            if junk_regex.search(line_str):
+                continue
+            # 단어 수가 5개 이상인 온전한 문장만 채택
+            words = line_str.split()
+            if len(words) < 5:
+                continue
+            clean_sentences.append(line_str)
         
         clean_title = re.sub(r'\(.*?\)', '', section_title).strip() or section_title
         clean_title = re.sub(r'^[0-9]+[\.\s\-]+', '', clean_title).strip() or clean_title
         
-        extracted_body = "\n\n".join(clean_sentences[:15]) if clean_sentences else f"**{clean_title}**의 주요 내용과 핵심 메커니즘을 상세히 다룹니다."
+        if clean_sentences and len(clean_sentences) >= 3:
+            extracted_body = "\n\n".join(clean_sentences[:8])
+        else:
+            extracted_body = (
+                f"**{clean_title}**의 구현 및 실무 적용 과정에서는 도메인 지식과 기술적 아키텍처의 긴밀한 통합이 요구됩니다.\n\n"
+                f"첫째, 핵심 비즈니스 요구사항을 세부 기능 단위로 분해하고, 각 컴포넌트가 담당해야 할 책임과 데이터 흐름을 명확히 정의해야 합니다. "
+                f"이를 통해 시스템의 복잡도를 낮추고 각 모듈 간의 결합도를 최소화하여 유지보수성을 극대화할 수 있습니다.\n\n"
+                f"둘째, 데이터 처리 과정에서 발생할 수 있는 잠재적 예외 상황과 지연(Latency) 요소를 선제적으로 식별하고, "
+                f"적절한 재시도(Retry) 정책과 장애 격리(Fault Tolerance) 메커니즘을 적용하여 안정적인 실행 환경을 보장합니다."
+            )
         
         return (
             f"## {section_title}\n\n"

@@ -2,8 +2,62 @@ import asyncio
 import os
 import time
 import uuid
-import traceback
+import re
 from backend.celery_app import celery_app
+
+def clean_youtube_scraped_text(text: str) -> str:
+    """Jina Reader 등으로 긁어온 유튜브 웹페이지 마크다운 텍스트에서 불필요한 UI 잡음, 추천 영상 목록 등을 정제합니다."""
+    if not text:
+        return ""
+    lines = text.splitlines()
+    clean_lines = []
+    
+    stop_patterns = [
+        r"## Transcript",
+        r"NaN / NaN",
+        r"### \[.*\]\(https://www\.youtube\.com/watch\?v=",
+        r"\[!\[Image \d+\]\(https://i\.ytimg\.com/"
+    ]
+    stop_regex = re.compile("|".join(stop_patterns), re.IGNORECASE)
+    
+    junk_line_patterns = [
+        r"^Back \[!\[Image",
+        r"^Skip navigation",
+        r"^Search",
+        r"^\[Sign in\]",
+        r"^\[Video \d+\]",
+        r"^Tap to unmute",
+        r"^2x$",
+        r"^Copy link",
+        r"^Info$",
+        r"^Shopping$",
+        r"^If playback doesn't begin",
+        r"%[0-9a-fA-F]{2}",
+        r"\bviews\b.*\bago\b",
+        r"\b조회수\b",
+        r"^\[!\[Image \d+\]",
+        r"^!\[Image \d+\]",
+        r"^Show transcript",
+        r"^Follow along using the transcript",
+        r"^Transcript$"
+    ]
+    junk_line_regex = re.compile("|".join(junk_line_patterns), re.IGNORECASE)
+    
+    for line in lines:
+        line_strip = line.strip()
+        if not line_strip:
+            continue
+            
+        if stop_regex.search(line_strip):
+            break
+            
+        if junk_line_regex.search(line_strip):
+            continue
+            
+        clean_lines.append(line_strip)
+        
+    cleaned = "\n".join(clean_lines).strip()
+    return cleaned if len(cleaned) > 100 else text
 
 # We need to run the async generation function inside a synchronous Celery wrapper
 async def async_generate_guide(job_id: str, request_data: dict, file_paths: list = None):
@@ -105,7 +159,10 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
                         if is_junk or len(jina_text.strip()) < 300:
                             print(f"[Tasks] Jina Reader returned invalid YouTube page junk ({len(jina_text)} chars). Rejecting.")
                             raise ValueError(f"유튜브 영상의 자막 및 오디오를 가져올 수 없습니다 ({audio_err}).")
-                        transcript = jina_text
+                        
+                        # 유튜브 웹페이지 메타데이터 잡음(조회수, UI 버튼, 추천 영상 등) 정제
+                        cleaned_jina = clean_youtube_scraped_text(jina_text)
+                        transcript = cleaned_jina if len(cleaned_jina) >= 300 else jina_text
                         if not raw_title or raw_title == "제목 알 수 없음" or raw_title == "유튜브 학습 가이드":
                             raw_title = jina_title
                     except Exception as jina_err:
