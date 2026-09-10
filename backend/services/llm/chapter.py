@@ -272,13 +272,16 @@ async def async_generate_chapter_content(
             if len(line_str) > 20 and not line_str.startswith(("#", "[", "http", "www")):
                 clean_sentences.append(line_str)
         
-        extracted_body = "\n\n".join(clean_sentences[:12]) if clean_sentences else f"**{section_title}**의 주요 내용과 핵심 메커니즘을 상세히 다룹니다."
+        clean_title = re.sub(r'\(.*?\)', '', section_title).strip() or section_title
+        clean_title = re.sub(r'^[0-9]+[\.\s\-]+', '', clean_title).strip() or clean_title
+        
+        extracted_body = "\n\n".join(clean_sentences[:12]) if clean_sentences else f"**{clean_title}**의 주요 내용과 핵심 메커니즘을 상세히 다룹니다."
         
         return (
             f"## {section_title}\n\n"
-            f"**{section_title}**의 핵심 개념과 주요 동작 원리를 체계적으로 분석하고 정리합니다.\n\n"
+            f"**{clean_title}**의 핵심 개념과 주요 동작 원리를 체계적으로 분석하고 정리합니다.\n\n"
             f"### 1. 도입 및 핵심 배경\n"
-            f"{section_title}은 시스템 아키텍처와 전체 워크플로우에서 매우 중요한 역할을 담당합니다. "
+            f"{clean_title}은 시스템 아키텍처와 전체 워크플로우에서 매우 중요한 역할을 담당합니다. "
             f"이 개념을 정확히 이해하면 복잡한 데이터 흐름과 로직을 명확하게 파악할 수 있으며, 실무 구현 시 발생할 수 있는 잠재적 문제를 사전에 방지할 수 있습니다. "
             f"기본기부터 심화 응용 단계까지 차근차근 점검하는 것이 안정적인 서비스 구축의 초석이 됩니다.\n\n"
             f"### 2. 세부 메커니즘 및 상세 해설\n"

@@ -119,16 +119,9 @@ def generate_outline(
         return response.text
 
     def _build_heuristic_sections(text: str, default_title: str = "학습 가이드") -> List[str]:
-        """모든 AI API 호출이 실패하거나 타임아웃되었을 때 자막 텍스트 기반으로 3~5개 챕터를 자동 생성하는 안전망."""
-        if not text or len(text.strip()) < 100:
-            return ["영상 개요 및 핵심 개념", "핵심 내용 심층 분석", "최종 요약 및 결론"]
-        
-        # 텍스트 길이에 따라 3~5개 챕터 기본 구조 생성
-        lines = [line.strip() for line in text.splitlines() if len(line.strip()) > 15]
-        first_line = lines[0][:40] if lines else default_title
-        
+        """모든 AI API 호출이 실패하거나 타임아웃되었을 때 깔끔한 4개 표준 챕터를 자동 생성하는 안전망."""
         return [
-            f"도입 및 핵심 배경 ({first_line[:25]}...)",
+            "도입 및 핵심 배경",
             "핵심 원리와 메커니즘 분석",
             "실무 활용 전략 및 주요 사례",
             "핵심 요약과 향후 전망"

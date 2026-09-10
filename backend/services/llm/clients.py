@@ -115,46 +115,51 @@ def get_openai_client(
 ):
     """OpenAI 호환 API 클라이언트(Groq, OpenRouter, NVIDIA NIM, Cerebras, OpenAI, BYOK)를 생성합니다."""
     api_key = custom_api_key
-    base_url = custom_base_url or settings.openai_base_url or os.getenv("OPENAI_BASE_URL")
+    target_base_url = custom_base_url
     p_lower = str(provider).lower() if provider else ""
     
     if not api_key:
         if "groq" in p_lower:
             api_key = settings.groq_api_key or os.getenv("GROQ_API_KEY")
-            base_url = base_url or "https://api.groq.com/openai/v1"
+            target_base_url = target_base_url or "https://api.groq.com/openai/v1"
         elif "openrouter" in p_lower or ":free" in p_lower:
             api_key = settings.openrouter_api_key or os.getenv("OPENROUTER_API_KEY")
-            base_url = base_url or "https://openrouter.ai/api/v1"
+            target_base_url = target_base_url or "https://openrouter.ai/api/v1"
         elif provider == "cerebras/gpt-oss-120b":
             api_key = settings.cerebras_api_key or os.getenv("CEREBRAS_API_KEY")
-            base_url = base_url or "https://api.cerebras.ai/v1"
+            target_base_url = target_base_url or "https://api.cerebras.ai/v1"
         elif provider == "glm-5.2":
             api_key = settings.glm_api_key or os.getenv("GLM_API_KEY")
         elif "nemotron" in p_lower or "nvidia" in p_lower:
             api_key = settings.nemotron_3_ultra_api_key or settings.glm_api_key or os.getenv("NEMOTRON_3_ULTRA_API_KEY") or os.getenv("GLM_API_KEY")
-            base_url = base_url or "https://integrate.api.nvidia.com/v1"
+            target_base_url = target_base_url or "https://integrate.api.nvidia.com/v1"
         elif (settings.openai_api_key or os.getenv("OPENAI_API_KEY")) and (settings.openai_api_key or os.getenv("OPENAI_API_KEY")) != "여기에_OPENAI_API_키를_입력하세요":
             api_key = settings.openai_api_key or os.getenv("OPENAI_API_KEY")
         else:
             if settings.openrouter_api_key or os.getenv("OPENROUTER_API_KEY"):
                 api_key = settings.openrouter_api_key or os.getenv("OPENROUTER_API_KEY")
-                base_url = base_url or "https://openrouter.ai/api/v1"
+                target_base_url = target_base_url or "https://openrouter.ai/api/v1"
             elif settings.groq_api_key or os.getenv("GROQ_API_KEY"):
                 api_key = settings.groq_api_key or os.getenv("GROQ_API_KEY")
-                base_url = base_url or "https://api.groq.com/openai/v1"
+                target_base_url = target_base_url or "https://api.groq.com/openai/v1"
             elif settings.nemotron_3_ultra_api_key or os.getenv("NEMOTRON_3_ULTRA_API_KEY"):
                 api_key = settings.nemotron_3_ultra_api_key or os.getenv("NEMOTRON_3_ULTRA_API_KEY")
-                base_url = base_url or "https://integrate.api.nvidia.com/v1"
+                target_base_url = target_base_url or "https://integrate.api.nvidia.com/v1"
             
     if not api_key:
         raise ValueError(f"{provider if provider else 'AI'} 모델을 위한 API 키가 설정되지 않았습니다. 개인 API Key를 입력하거나 .env 설정을 확인해주세요.")
     
-    if not base_url and api_key.startswith("nvapi-"):
-        base_url = "https://integrate.api.nvidia.com/v1"
-    elif not base_url and api_key.startswith("gsk_"):
-        base_url = "https://api.groq.com/openai/v1"
-    elif not base_url and api_key.startswith("sk-or-"):
-        base_url = "https://openrouter.ai/api/v1"
+    # 키 접두사 기반 자동 엔드포인트 판별
+    if not custom_base_url:
+        if api_key.startswith("sk-or-"):
+            target_base_url = "https://openrouter.ai/api/v1"
+        elif api_key.startswith("gsk_"):
+            target_base_url = "https://api.groq.com/openai/v1"
+        elif api_key.startswith("nvapi-"):
+            target_base_url = "https://integrate.api.nvidia.com/v1"
+        elif not target_base_url:
+            target_base_url = settings.openai_base_url or os.getenv("OPENAI_BASE_URL")
+    base_url = target_base_url
         
     try:
         import openai
