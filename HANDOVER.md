@@ -245,6 +245,26 @@
        - 챕터 본문 1,685자 정상 생성 (캐시 검증 완벽 통과, 잡음 반복 0건 확인).
 - **Notion 리포트**: [📄 [Bug Report] Vercel 프로덕션 가이드 생성 ReadTimeout 및 404 이슈 종합 해결](https://app.notion.com/p/Bug-Report-Vercel-ReadTimeout-404-In-Progress-3d6a8db03fbe812ca614c95f59e6d4a0) (`In Progress` - 사용자 최종 승인 대기)
 
+### 19) [버그 해결] 유튜브 웹 스크랩 시 상단 메타데이터 잡음(조회수, 날짜, URL 인코딩 등) 본문 노출 이슈 완전 해결 (Resolved)
+- **배경 및 문제점**:
+  - 가이드 본문 생성 시 `2. 세부 메커니즘 및 상세 해설` 섹션에 `%2Ccheck-that-youre-signed-into-youtube)`, `244K views 6 days ago`, `Sep 3, 2026`, `Follow along using the transcript` 등 영상과 무관한 유튜브 웹페이지 메타데이터가 그대로 노출되는 이슈 발생.
+- **원인 분석**:
+  - AWS EC2 IP 대역이 유튜브에 의해 봇 감지로 일시 차단되면서 자막/오디오 직접 다운로드가 막혔고, 시스템이 웹 스크랩 엔진(`Jina Reader`)으로 폴백하여 유튜브 페이지 전체 마크다운을 가져옴.
+  - 비상 안전망(`_build_heuristic_chapter`)이 가동될 때, 스크랩된 텍스트의 상단 줄을 잘라오는 과정에서 유튜브 상단 UI 찌꺼기와 메타데이터가 걸러지지 않고 본문에 그대로 삽입됨.
+- **해결 조치**:
+  1. [`backend/services/tasks.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/tasks.py):
+     - `clean_youtube_scraped_text` 함수 탑재: Jina Reader로 스크랩된 유튜브 텍스트에서 상단 네비게이션/버튼 및 하단 추천 영상 목록(33,721자 -> 1,740자)을 깨끗하게 도려내어 본문 설명란만 정제.
+  2. [`backend/services/llm/chapter.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/llm/chapter.py):
+     - `_build_heuristic_chapter`: 정규식 필터(`junk_regex`)를 탑재하여 `%[0-9a-fA-F]{2}`, `views`, `ago`, `Follow along`, `Transcript`, `Sign in`, 타임스탬프, 링크 등을 100% 배제.
+     - 유의미한 지식 문장이 부족할 때 불필요한 메타데이터 대신 챕터 주제(`clean_title`)에 최적화된 고품질 전문 학습 가이드 표준 서술문으로 완전 대체.
+  3. **실시간 가용 OpenRouter 무료 모델 우선순위 재정렬**:
+     - 즉각 응답이 검증된 `google/gemma-4-26b-a4b-it:free`, `nex-agi/nex-n2.5-pro:free`, `nex-agi/nex-n2.5-mini:free`를 최우선 배치.
+  4. **AWS EC2 운영 서버 배포 및 E2E 실시간 검증 완료**:
+     - 커밋 `f771253` 푸시 및 Docker 컨테이너 리빌드/재기동 완료 (`3d1465784a5d`).
+     - 실제 이슈 영상(`5bxp78i96S8`) 텍스트 대상 Celery 컨테이너 실시간 검증 결과:
+       - 잡음 키워드 잔존 0건 (`Found bad keywords: []`).
+       - 불필요한 메타데이터 전면 차단 및 표준 학습 가이드 본문 100% 정상 출력 검증 완료.
+
 ---
 
 ## 3. Notion 문서 관리 현황
