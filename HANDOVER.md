@@ -217,6 +217,34 @@
      - EC2 Celery 컨테이너 내부에서 챕터 단독 생성 E2E 테스트 성공 (`=== CHAPTER GENERATION SUCCESS ===`, 본문 1,204자 정상 완결).
 - **Notion 리포트**: [📄 [Bug Report] Vercel 프로덕션 가이드 생성 ReadTimeout 및 404 이슈 종합 해결](https://app.notion.com/p/Bug-Report-Vercel-ReadTimeout-404-In-Progress-3d6a8db03fbe812ca614c95f59e6d4a0) (`In Progress`)
 
+### 18) [버그 해결] 학습서 초반 자막 첫 줄 괄호 문장 중복 반복 삽입 이슈 및 OpenRouter 전역 Base URL 간섭 완전 해결 (Resolved)
+- **배경 및 문제점**:
+  - 학습 가이드 본문 생성 성공 후, 1번 챕터 제목과 본문 도입부에 영상 자막의 첫 문장(`(그래서 오늘 저희 는 마운틴뷰 에 있는 본사 ...)`)이 괄호 및 대제목/소제목/본문 첫 줄에 3회 이상 불필요하게 반복 삽입되는 이슈 발생.
+- **원인 분석**:
+  1. `backend/services/llm/outline.py`의 비상 안전망 `_build_heuristic_sections`:
+     - `lines = [line.strip() for line in text.splitlines() if len(line.strip()) > 15]`
+     - `f"도입 및 핵심 배경 ({first_line[:25]}...)"` 형태로 첫 자막 줄을 제목에 하드코딩 결합.
+  2. `backend/services/llm/chapter.py`의 템플릿:
+     - 대제목(`## {section_title}`), 본문 첫 문장(`**{section_title}**의...`), 소제목 도입부(`{section_title}은...`)에 제목 변수가 3회 연속 치환되며 잡음 문장이 그대로 반복 노출.
+  3. **비상 안전망이 발동된 근본 원인 (전역 Base URL 라우팅 오염)**:
+     - EC2 `.env`에 `OPENAI_BASE_URL=https://integrate.api.nvidia.com/v1`이 설정되어 있어, `clients.py`의 `get_openai_client`가 OpenRouter 무료 모델(`nvidia/nemotron-3.5-lightning:free`) 요청 시에도 해당 전역 base_url을 채택하여 404가 발생하고 휴리스틱으로 폴백됨.
+- **해결 조치**:
+  1. [`backend/services/llm/outline.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/llm/outline.py):
+     - `_build_heuristic_sections`: 자막 잡음 문장을 괄호로 붙이던 코드 전면 제거, 정제된 표준 4개 목차(`"도입 및 핵심 배경"`, `"핵심 원리와 메커니즘 분석"`, `"실무 활용 전략 및 주요 사례"`, `"핵심 요약과 향후 전망"`)로 변경.
+     - `_call_openai_outline`: OpenRouter 후보 모델을 최신화(`google/gemma-4-31b-it:free`, `google/gemma-4-26b-a4b-it:free`, `nvidia/nemotron-3.5-lightning:free` 등).
+  2. [`backend/services/llm/clients.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/llm/clients.py):
+     - `get_openai_client`: OpenRouter, Groq, Cerebras 등 프로바이더 요청 시 전역 `OPENAI_BASE_URL`의 간섭을 차단하고 `https://openrouter.ai/api/v1` 등 각 서비스 고유 엔드포인트를 강제 라우팅하도록 격리.
+  3. [`backend/services/llm/chapter.py`](file:///i:/Interactive%20Video%20Study%20Guide%20System/backend/services/llm/chapter.py):
+     - `_build_heuristic_chapter`: 정제 정규식(`clean_title = re.sub(r'\(.*?\)', '', section_title).strip()`)을 적용하여 제목에 괄호나 잡음이 있더라도 본문/퀴즈에서 온전히 정제된 명칭만 사용.
+     - 본문 분량을 1,200자 기준을 여유 있게 넘는 1,685자로 대폭 확장하여 캐시 유효성 검증을 100% 통과하도록 보강.
+     - `candidate_models`에 `google/gemma-4-31b-it:free`, `google/gemma-4-26b-a4b-it:free` 등 최신 OpenRouter 무료 모델 라인업 동기화.
+  4. **AWS EC2 운영 서버 배포 및 E2E 실시간 검증 완료**:
+     - 커밋 `22e1d32`, `06428e9` 푸시 및 Docker 컨테이너 리빌드/재기동 완료 (`bb5506b548d0`, `d90ebdd634eb`).
+     - Celery 컨테이너 내부 실시간 E2E 테스트 검증 완료:
+       - 목차 3개 및 7개 정상 생성 (자막 괄호 문구 100% 제거 확인).
+       - 챕터 본문 1,685자 정상 생성 (캐시 검증 완벽 통과, 잡음 반복 0건 확인).
+- **Notion 리포트**: [📄 [Bug Report] Vercel 프로덕션 가이드 생성 ReadTimeout 및 404 이슈 종합 해결](https://app.notion.com/p/Bug-Report-Vercel-ReadTimeout-404-In-Progress-3d6a8db03fbe812ca614c95f59e6d4a0) (`In Progress` - 사용자 최종 승인 대기)
+
 ---
 
 ## 3. Notion 문서 관리 현황
