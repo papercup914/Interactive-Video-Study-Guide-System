@@ -23,7 +23,8 @@ def generate_outline(
     force_refresh: bool = False, 
     video_chapters: list = None,
     custom_api_key: Optional[str] = None,
-    custom_base_url: Optional[str] = None
+    custom_base_url: Optional[str] = None,
+    default_title: str = "학습 가이드"
 ) -> List[str]:
     """
     오디오 컨텍스트를 분석하여 상세 목차를 생성하고 로컬에 캐시합니다.
@@ -319,7 +320,7 @@ def generate_outline(
             
     if not sections:
         print("[Outline Fallback] AI outline generation yielded no valid sections. Triggering Smart Heuristic Outline...")
-        sections = _build_heuristic_sections(context_data)
+        sections = _build_heuristic_sections(context_data, default_title=default_title)
     else:
         conclusion_keywords = ("결론", "마무리", "총평", "끝마치며", "마치며", "최종 요약")
         intro_keywords = ("도입", "개요", "시작", "소개", "오프닝", "시작하며", "프롤로그")

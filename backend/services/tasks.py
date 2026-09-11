@@ -270,7 +270,8 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
             force_refresh, 
             video_chapters,
             custom_api_key,
-            custom_base_url
+            custom_base_url,
+            raw_title
         )
         
         # 2중 안전 가드레일: 목차 제목에 괄호나 잡음이 남아있을 경우 완전 소거
