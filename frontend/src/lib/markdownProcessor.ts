@@ -46,6 +46,9 @@ export function cleanAndNormalizeMarkdown(sectionName: string, text: string): st
     
     // 기계적 서두 요약 문장 제거 (예: "**도입...**의 핵심 개념과 주요 동작 원리를 체계적으로 분석하고 정리합니다.")
     processed = processed.replace(new RegExp(`^\\s*(?:\\*\\*)?(?:${escaped}|${escapedClean})(?:\\*\\*)?의\\s*핵심\\s*개념과\\s*주요\\s*동작\\s*원리를\\s*체계적으로\\s*분석하고\\s*정리합니다\\.[\\s\\n]*`, 'i'), '');
+
+    // 기계적 서두 안내 문장 제거 (예: "본 챕터에서는 **...**의 핵심 맥락과 주요 통찰을 체계적으로 살펴봅니다.")
+    processed = processed.replace(new RegExp(`^\\s*본\\s*챕터에서는\\s*(?:\\*\\*)?(?:${escaped}|${escapedClean})(?:\\*\\*)?[의에]\\s*(?:담긴\\s*)?핵심\\s*맥락과\\s*주요\\s*통찰을\\s*체계적으로\\s*살펴봅니다\\.[\\s\\n]*`, 'i'), '');
   }
 
   // 첫 줄이 제목 형태인 경우 보존하며 두 번째 줄 이하의 인사말 블록 제거

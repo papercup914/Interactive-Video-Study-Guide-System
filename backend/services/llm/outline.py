@@ -162,35 +162,44 @@ def generate_outline(
         return response.text
 
     def _build_heuristic_sections(text: str, default_title: str = "학습 가이드") -> List[str]:
-        """모든 AI API 호출이 실패하거나 타임아웃되었을 때 도메인 맞춤형 4개 표준 챕터를 자동 생성하는 지능형 안전망."""
+        """모든 AI API 호출이 실패하거나 타임아웃되었을 때 영상의 실제 주제어를 반영한 4개 표준 챕터를 자동 생성하는 안전망."""
+        # 1. default_title에서 브래킷 태그 제거 및 핵심 주제어 추출
+        raw_t = re.sub(r'\[.*?\]', '', default_title).strip()
+        raw_t = re.sub(r'^[0-9]+[\.\s\-]+', '', raw_t).strip()
+        # 하이픈, 콜론 등으로 구분된 구절 중 가장 의미 있는 토픽 구절 추출
+        topic_parts = [p.strip() for p in re.split(r'[-:|–—]', raw_t) if len(p.strip()) >= 2]
+        clean_topic = topic_parts[0] if topic_parts else "핵심 주제"
+        if clean_topic in ("학습 가이드", "유튜브 학습 가이드", "AI 맞춤형 학습 가이드") or len(clean_topic) < 2:
+            clean_topic = "핵심 주제와 문제의식"
+
         combined_text = (default_title + " " + (text[:1000] if text else "")).lower()
         
-        # 1. 비즈니스 / 스타트업 / 마케팅 / 인터뷰 / 에세이 계열 감지
+        # 2. 비즈니스 / 스타트업 / 마케팅 / 인터뷰 / 에세이 계열 감지
         biz_keywords = ["startup", "스타트업", "창업", "사업", "founder", "ambition", "vc", "yc", "투자", "비즈니스", "마케팅", "ceo", "경영", "돈", "성공", "인터뷰", "이야기", "철학"]
         if any(kw in combined_text for kw in biz_keywords):
             return [
-                "도입: 왜 지금 이 주제에 주목해야 하는가?",
-                "흔히 오해하는 착각과 실패 원인",
-                "성공을 가르는 결정적 조건과 핵심 통찰",
-                "실전 적용: 당장 실천해야 할 핵심 전략"
+                f"도입: {clean_topic}의 본질과 핵심 배경",
+                f"{clean_topic}을 둘러싼 오해와 주요 실패 요인",
+                f"{clean_topic}의 성공을 가르는 결정적 조건과 통찰",
+                f"실전 적용: {clean_topic}을 위한 핵심 실천 전략"
             ]
             
-        # 2. 기술 / 프로그래밍 / 개발 / 아키텍처 계열 감지
+        # 3. 기술 / 프로그래밍 / 개발 / 아키텍처 계열 감지
         tech_keywords = ["docker", "python", "api", "code", "개발", "코드", "서버", "아키텍처", "데이터", "프레임워크", "알고리즘", "인프라", "llm", "ai 모델"]
         if any(kw in combined_text for kw in tech_keywords):
             return [
-                "시스템 도입 배경과 핵심 아키텍처",
-                "핵심 동작 메커니즘과 데이터 흐름",
-                "실무 구현 전략 및 장애 방지 가이드",
-                "최종 점검과 성능 최적화 체크리스트"
+                f"도입: {clean_topic}의 배경과 시스템 아키텍처",
+                f"{clean_topic}의 핵심 동작 원리와 데이터 흐름",
+                f"{clean_topic}의 실무 구현 전략과 장애 방지 가이드",
+                f"최종 점검: {clean_topic} 최적화 체크리스트"
             ]
             
-        # 3. 일반 교양 / 인문 / 라이프스타일 / 기타 보편형
+        # 4. 일반 교양 / 인문 / 라이프스타일 / 기타 보편형
         return [
-            "도입: 본질을 꿰뚫는 핵심 질문",
-            "심층 분석과 새로운 시각",
-            "일상과 실무를 바꾸는 실천 팁",
-            "핵심 요약과 미래 통찰"
+            f"도입: {clean_topic}의 핵심 배경과 질문",
+            f"{clean_topic}에 대한 심층 분석과 새로운 시각",
+            f"{clean_topic}이 주는 일상과 실무의 시사점",
+            f"핵심 요약: {clean_topic}의 미래 통찰"
         ]
 
     @retry(retry=retry_if_exception(_should_retry_error), stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1.5, min=2, max=10))
@@ -259,7 +268,7 @@ def generate_outline(
             except Exception as e:
                 last_error = e
                 try:
-                    response = client.chat.completions.create(
+                    response = cur_client.chat.completions.create(
                         model=clean_m,
                         messages=[
                             {"role": "system", "content": prompt + "\n반드시 마크다운 코드블록 없이 순수 JSON 형식 ({\"sections\": [\"챕터1\", \"챕터2\", ...]})으로만 출력해줘."},
