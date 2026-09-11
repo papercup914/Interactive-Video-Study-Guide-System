@@ -240,9 +240,9 @@ def generate_outline(
         last_error = None
         for cur_model in candidate_models:
             clean_m = cur_model.replace("openrouter/", "") if "/" in cur_model and cur_model.startswith("openrouter/") else cur_model
-            # 모델에 따른 OpenRouter 전용 클라이언트 분기
+            # 모델에 따른 OpenRouter 전용 클라이언트 분기 (타 엔드포인트 base_url 간섭 원천 차단)
             if ":free" in cur_model or "openrouter" in cur_model:
-                cur_client = get_openai_client("openrouter", custom_api_key=custom_api_key, custom_base_url=custom_base_url, timeout=35.0)
+                cur_client = get_openai_client("openrouter", custom_api_key=custom_api_key, custom_base_url=None, timeout=35.0)
             else:
                 cur_client = client
                 

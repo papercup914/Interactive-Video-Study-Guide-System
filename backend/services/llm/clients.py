@@ -159,6 +159,12 @@ def get_openai_client(
             target_base_url = "https://integrate.api.nvidia.com/v1"
         elif not target_base_url:
             target_base_url = settings.openai_base_url or os.getenv("OPENAI_BASE_URL")
+
+    # OpenRouter 전용 엄격 격리: 키가 sk-or-로 시작하거나 openrouter/free 계열이면 타 엔드포인트(NVIDIA 등) 오염 방지
+    if (api_key and api_key.startswith("sk-or-")) or ("openrouter" in p_lower) or (":free" in p_lower):
+        if not target_base_url or "openrouter.ai" not in target_base_url:
+            target_base_url = "https://openrouter.ai/api/v1"
+
     base_url = target_base_url
         
     try:

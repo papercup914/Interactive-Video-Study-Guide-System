@@ -246,9 +246,9 @@ async def async_generate_chapter_content(
         last_error = None
         for cur_model in candidate_models:
             clean_m = cur_model.replace("openrouter/", "") if "/" in cur_model and cur_model.startswith("openrouter/") else cur_model
-            # 모델 슬러그에 따라 OpenRouter 엔드포인트 자동 격리 라우팅
+            # 모델 슬러그에 따라 OpenRouter 엔드포인트 자동 격리 라우팅 (타 엔드포인트 base_url 간섭 원천 차단)
             if ":free" in cur_model or "openrouter" in cur_model:
-                cur_client = get_openai_client("openrouter", custom_api_key=custom_api_key, custom_base_url=custom_base_url, timeout=25.0)
+                cur_client = get_openai_client("openrouter", custom_api_key=custom_api_key, custom_base_url=None, timeout=35.0)
             else:
                 cur_client = client
                 
@@ -289,7 +289,10 @@ async def async_generate_chapter_content(
             r"\bUnmute\b", r"\bplayback\b", r"Follow along", r"\btranscript\b", r"\bNaN\b",
             r"\bChapters\b", r"Skip navigation", r"Search with your voice", r"Sign in",
             r"Copy link", r"Tap to unmute", r"Image \d+", r"!\[Image", r"### \[",
-            r"^\d{1,2}:\d{2}", r"\b\d{1,2}:\d{2}\b", r"^\s*-\s*$"
+            r"^\d{1,2}:\d{2}", r"\b\d{1,2}:\d{2}\b", r"^\s*-\s*$",
+            r"error occurred", r"sharing information", r"protect our community",
+            r"Please try again", r"This helps protect", r"\.{3,}more\b", r"\bmore\s*$",
+            r"Visiting Partner", r"sits down with", r"at the original", r"office in Mountain View"
         ]
         junk_regex = re.compile("|".join(junk_patterns), re.IGNORECASE)
 
@@ -311,8 +314,14 @@ async def async_generate_chapter_content(
         clean_title = re.sub(r'\(.*?\)', '', section_title).strip() or section_title
         clean_title = re.sub(r'^[0-9]+[\.\s\-]+', '', clean_title).strip() or clean_title
         
-        if clean_sentences and len(clean_sentences) >= 3:
-            extracted_body = "\n\n".join(clean_sentences[:8])
+        # 가드레일: 한국어 문장만 채택하여 영문 에러 메시지나 날것의 영어 원문이 노출되는 것을 완벽 방지
+        korean_sentences = [
+            s for s in clean_sentences 
+            if len(re.findall(r'[가-힣]', s)) >= 10
+        ]
+        
+        if korean_sentences and len(korean_sentences) >= 2:
+            extracted_body = "\n\n".join(korean_sentences[:6])
         else:
             extracted_body = (
                 f"**{clean_title}**의 본질을 명확히 이해하기 위해서는 핵심 원리와 실제 적용 사례를 함께 살펴보아야 합니다.\n\n"
