@@ -58,18 +58,18 @@ Interactive Video Study Guide System은 유튜브 영상 또는 웹 문서를 �
 * **에스컬레이션 프롬프트 3배 누적 팽창 주장 해명**:
   * 원본 불변 객체인 `base_system_prompt`에 당회차 `escalation`만 결합하므로 재시도가 발생해도 프롬프트가 3배로 불어나지 않음을 규명.
 
-### 2.6 [Track A 완수] Neon PostgreSQL 클라우드 DB 전환, user_id 격리 및 일일 쿼터 안전망 구축
+### 2.6 [Track A 완수] Neon PostgreSQL 전환, 쿼터 배지, YouTube 싱크, 내보내기, PWA, 운영 배포 (전체 5단계 완수)
 * **배경 및 목적**:
-  * 기존 SQLite 단일 파일(`jobs.db`)로 인한 Celery 동시성 락 충돌과 미인증/무제한 생성으로 인한 서버 API 키 비용 폭사 위험을 영구 차단하기 위함.
+  * 기존 SQLite 단일 파일(`jobs.db`)의 동시성 락 충돌과 미인증/무제한 생성으로 인한 서버 API 키 비용 폭사 위험을 영구 차단하고, 스토어 규격(Store-Ready)과 학습자 생산성(내보내기/싱크)을 완비하기 위함.
 * **작업 내용**:
-  1. **Docker Compose SQLite 하드코딩 제거**: `docker-compose.yml`에서 `fastapi`와 `celery_worker`의 `DATABASE_URL=sqlite:///./backend/data/jobs.db`를 제거하고, `.env` 및 `backend/.env`의 **Neon PostgreSQL**(`postgresql://neondb_owner:...`)이 최우선 적용되도록 수정.
-  2. **`user_id` 모델링 및 마이그레이션**: `Job` 및 `StudyGuide` 모델에 `user_id` 컬럼 추가, `job_manager.py:init_db_schema()`에서 PostgreSQL 기동 시 자동 컬럼 마이그레이션 적용.
-  3. **일일 쿼터(`UserUsage`) 시스템 구축**: 
-     - `UserUsage` 테이블 신설(`user_id`, `date`, `generation_count`).
-     - 유저당 1일 최대 3회 생성 제한 (`check_and_increment_quota`). 초과 시 `HTTP 429 Too Many Requests` 차단.
-     - BYOK(사용자 본인 API 키 입력)인 경우 서버 비용이 발생하지 않으므로 쿼터 제한 면제.
-     - 사용자 잔여 쿼터 조회 API(`GET /api/guide/quota`) 및 사용자별 가이드 목록 격리(`GET /api/guide/history`) 지원.
-  4. **완전 검증 통과**: `tests/test_track_a_neon_and_quota.py` 실행 결과, Neon PostgreSQL 실제 연결, 스키마 마이그레이션, `user_id` 저장, 3회 허용 및 4회차 429 차단 동작까지 100% 정상 통과 (`Exit code 0`).
+  1. **Neon PostgreSQL 클라우드 DB 전환**: `docker-compose.yml`에서 SQLite 강제 설정을 제거하고 `.env`의 **Neon PostgreSQL**(`postgresql://neondb_owner:...`)을 최우선 적용.
+  2. **`user_id` 모델링 및 마이그레이션**: `Job`, `StudyGuide`에 `user_id` 추가, DB 기동 시 자동 스키마 마이그레이션 적용.
+  3. **일일 3회 쿼터 시스템 (`UserUsage`)**: 1인당 1일 3회 제한 (`check_and_increment_quota`), 4회차 시 `HTTP 429` 차단, BYOK 입력 시 무제한 허용.
+  4. **프론트엔드 잔여 쿼터 배지 & Auth 연동**: 메인 화면 Hero 섹션에 `"오늘 무료 생성 한도: 2/3회 남음"` 배지 렌더링, `fetch("/api/guide/start")`에 Supabase JWT 토큰 연동.
+  5. **상단 YouTube Player 타임스탬프 싱크 (`seekToTime`)**: HTML5 postMessage 프로토콜로 외부 라이브러리 없이 가이드 내 타임스탬프(`[02:15]`) 클릭 시 영상 해당 위치로 즉시 점프 및 재생. 구글 플레이 스토어 ToS 규정 완벽 준수.
+  6. **지식 내보내기 (Export)**: 가이드 뷰어 상단에 **[MD 다운로드]** 및 **[Notion 복사]** 버튼 추가 (클릭 시 마크다운 파일 다운로드 또는 노션 최적화 클립보드 복사).
+  7. **모바일 PWA 패키징**: `manifest.json`, 512x512 벡터 앱 아이콘(`icons/icon.svg`), `layout.tsx` 메타 태그 완비 (스마트폰 홈 화면 추가 시 네이티브 앱처럼 실행).
+  8. **AWS EC2 운영 서버 배포 완료**: Git 푸시 ➔ EC2 원격 동기화 ➔ Docker Compose 컨테이너 리빌드 완료 (`FastAPI 200 OK`, `Celery Ready`).
 
 ---
 
@@ -90,37 +90,22 @@ Interactive Video Study Guide System은 유튜브 영상 또는 웹 문서를 �
 
 ## 4. 운영 환경 배포 및 명령어 가이드
 
-### 4.1 로컬 검증 완료 상태
+### 4.1 로컬 및 운영 검증 완료 상태
 * **백엔드 컴파일 검증 완료**: `tasks.py`, `chapter.py`, `outline.py`, `validators.py`, `models.py`, `job_manager.py`, `auth.py`, `guide.py` (Exit code 0)
-* **PostgreSQL 및 쿼터 단위 테스트 완료**: `python tests/test_track_a_neon_and_quota.py` (Exit code 0)
+* **PostgreSQL 및 쿼터 단위 테스트 완료**: `python tests/test_track_a_neon_and_quota.py` (5개 테스트 전체 통과, Exit code 0)
 * **프론트엔드 Turbopack 빌드 완료**: `cd frontend && npm run build` (Exit code 0)
+* **AWS EC2 운영 서버 배포 완료**: FastAPI 및 Celery 컨테이너 리빌드/재기동 확인 (`13.209.73.143:8000/health` 200 OK)
+* **Vercel Production 배포 완료**: `main` 브랜치 자동 배포
 
-### 4.2 Git 커밋 및 Vercel 자동 배포
-```bash
-git add .
-git commit -m "feat(infra): migrate to Neon PostgreSQL, add user_id isolation and daily quota rate-limiting"
-git push origin main
-```
-
-### 4.3 AWS EC2 운영 서버 배포 명령어
-```bash
-# 1. EC2 접속 및 최신 코드 동기화
-ssh -i "aws/studyguide-key.pem" -o StrictHostKeyChecking=no ubuntu@13.209.73.143 "cd /home/ubuntu/Interactive-Video-Study-Guide-System && git pull origin main"
-
-# 2. 도커 컨테이너 리빌드 및 재기동 (Neon PostgreSQL 자동 연결)
-ssh -i "aws/studyguide-key.pem" -o StrictHostKeyChecking=no ubuntu@13.209.73.143 "cd /home/ubuntu/Interactive-Video-Study-Guide-System && docker compose build celery_worker fastapi && docker compose up -d celery_worker fastapi"
-
-# 3. 실시간 컨테이너 상태 및 로그 확인
-ssh -i "aws/studyguide-key.pem" -o StrictHostKeyChecking=no ubuntu@13.209.73.143 "docker compose -f /home/ubuntu/Interactive-Video-Study-Guide-System/docker-compose.yml ps"
-ssh -i "aws/studyguide-key.pem" -o StrictHostKeyChecking=no ubuntu@13.209.73.143 "docker logs --tail 100 studyguide-fastapi"
-```
+### 4.2 Git 배포 내역
+* 최신 커밋: `feat(track-a): complete store-ready infrastructure with Neon DB, quota badge, YouTube sync, Markdown export and PWA` (Hash: `8273188`)
 
 ---
 
 ## 5. 다음 세션 인수인계 지침
 
 1. **새 세션 시작 시 (Track B 전담)**:
-   * 본 `HANDOVER.md`를 최우선으로 검토하고 이전 작업 맥락(Track A 완수)과 현재 진행 상태를 사용자에게 브리핑한 후 작업을 개시할 것.
+   * 본 `HANDOVER.md`를 최우선으로 검토하고 이전 작업 맥락(Track A 전체 완수 및 EC2 배포 완료)과 현재 진행 상태를 사용자에게 브리핑한 후 작업을 개시할 것.
 2. **Track B 핵심 과제 착수**:
    * 현재 `In Progress` 상태인 `[Bug Report] 목차 안전망의 맹탕 질문형 챕터명 및 본문 내 기계적 주어 반복 노출 이슈`를 해결할 것.
    * `backend/services/outline.py`의 휴리스틱 질문형 목차 폴백 로직을 도메인 맞춤형 서술식 챕터명으로 전면 개편.
