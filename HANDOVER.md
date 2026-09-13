@@ -71,6 +71,18 @@ Interactive Video Study Guide System은 유튜브 영상 또는 웹 문서를 �
   7. **모바일 PWA 패키징**: `manifest.json`, 512x512 벡터 앱 아이콘(`icons/icon.svg`), `layout.tsx` 메타 태그 완비 (스마트폰 홈 화면 추가 시 네이티브 앱처럼 실행).
   8. **AWS EC2 운영 서버 배포 완료**: Git 푸시 ➔ EC2 원격 동기화 ➔ Docker Compose 컨테이너 리빌드 완료 (`FastAPI 200 OK`, `Celery Ready`).
 
+### 2.7 [안드로이드 네이티브 앱] Jetpack Compose WebView 래퍼 & GitHub Actions APK 빌드 파이프라인 구축
+* **배경**: 스마트폰 기기에서 웹 브라우저 주소창 없이 네이티브 앱 환경으로 학습하고, 하드웨어 뒤로가기 제어 및 마크다운 파일 다운로드를 지원하기 위함.
+* **구현 내용**:
+  1. **네이티브 안드로이드 프로젝트 신설 (`android/`)**:
+     * Jetpack Compose + 최신 Android SDK 36 (`minSdk 24`, `namespace: com.example.studyguide`).
+     * `MainActivity.kt`: 프로덕션급 WebView 래퍼 구현 (하드웨어 뒤로가기 `BackHandler`, 상단 로딩 프로그레스바 `LinearProgressIndicator`, 쿠키 및 로컬스토리지 완벽 유지).
+     * **안드로이드 시스템 다운로드 매니저(`DownloadManager`) 연동**: 가이드 뷰어의 [MD 다운로드] 버튼 클릭 시 모바일 기기 내부 `Download/` 폴더에 즉시 파일 저장.
+     * **네트워크 권한**: `AndroidManifest.xml`에 `INTERNET`, `ACCESS_NETWORK_STATE` 선언.
+  2. **GitHub Actions 클라우드 APK 빌드 자동화 (`.github/workflows/android-build.yml`)**:
+     * 코드 푸시 시 `ubuntu-latest`, Temurin JDK 17, `setup-android` 환경에서 `./gradlew assembleDebug` 자동 실행.
+     * 빌드 성공 시 `studyguide-debug-apk` 아티팩트(`app-debug.apk`) 자동 생성 및 즉시 다운로드 제공.
+
 ---
 
 ## 3. Notion 버그 리포트 관리 현황
