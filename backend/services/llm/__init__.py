@@ -17,6 +17,7 @@ from backend.services.llm.clients import (
 from backend.services.llm.cache import (
     get_or_create_document_cache,
     clean_invalid_cached_chapters,
+    clean_invalid_cached_outlines,
     _get_cache_dir
 )
 
@@ -59,6 +60,7 @@ __all__ = [
     "_llm_executor",
     "get_or_create_document_cache",
     "clean_invalid_cached_chapters",
+    "clean_invalid_cached_outlines",
     "_get_cache_dir",
     "sanitize_chapter_narrative",
     "validate_chapter_narrative",
