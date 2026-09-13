@@ -382,7 +382,11 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
         
         generation_time_sec = int(time.time() - start_time)
         pm = profile_result.get("profile_message", "")
-        save_study_guide(job_id, url, translated_title, "", provider, document, learner_profile, pm, generation_time_sec, length_preset, analogy_preset, str(video_duration))
+        save_study_guide(
+            job_id, url, translated_title, "", provider, document, learner_profile, pm, 
+            generation_time_sec, length_preset, analogy_preset, str(video_duration),
+            user_id=request_data.get("user_id")
+        )
         
     except Exception as e:
         error_msg = f"{str(e)}\n{traceback.format_exc()}"

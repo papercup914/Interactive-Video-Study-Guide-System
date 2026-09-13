@@ -61,6 +61,7 @@ export function VideoPanel({
         <div className="aspect-video w-full bg-black rounded-lg relative overflow-hidden mb-6 shadow-sm border border-border-subtle group">
           {embedUrl ? (
             <iframe 
+              id="youtube-player-iframe"
               src={embedUrl} 
               className="w-full h-full border-none"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 

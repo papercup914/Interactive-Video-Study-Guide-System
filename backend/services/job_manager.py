@@ -3,7 +3,7 @@ import os
 from typing import Dict, Any
 from datetime import datetime, timezone
 from backend.data.database import SessionLocal, engine
-from backend.data.models import Base, Job, JobCheckpoint, StudyGuide, BatchJob, BatchVideoItem
+from backend.data.models import Base, Job, JobCheckpoint, StudyGuide, BatchJob, BatchVideoItem, UserUsage
 from typing import List, Optional
 
 from sqlalchemy import text, or_, inspect
@@ -32,11 +32,20 @@ def init_db_schema() -> None:
                 if col not in batch_cols:
                     conn.execute(text(f"ALTER TABLE batch_jobs ADD COLUMN {col} {col_type}"))
                     
-        # 2. study_guides 테이블의 video_id 컬럼 검사
+        # 2. study_guides 테이블의 video_id 및 user_id 컬럼 검사
         guide_cols = {c["name"] for c in inspector.get_columns("study_guides")}
-        if "video_id" not in guide_cols:
-            with engine.begin() as conn:
+        with engine.begin() as conn:
+            if "video_id" not in guide_cols:
                 conn.execute(text("ALTER TABLE study_guides ADD COLUMN video_id VARCHAR"))
+            if "user_id" not in guide_cols:
+                conn.execute(text("ALTER TABLE study_guides ADD COLUMN user_id VARCHAR"))
+                
+        # 3. jobs 테이블의 user_id 컬럼 검사
+        job_cols = {c["name"] for c in inspector.get_columns("jobs")}
+        if "user_id" not in job_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE jobs ADD COLUMN user_id VARCHAR"))
+
         _schema_initialized = True
     except Exception as e:
         print(f"[DB Schema Init Notice] {e}")
@@ -113,9 +122,9 @@ def update_study_guide_notes(job_id: str, document: dict, notes: list) -> bool:
         db.commit()
         return True
 
-def create_job(job_id: str) -> None:
+def create_job(job_id: str, user_id: Optional[str] = None) -> None:
     with SessionLocal() as db:
-        new_job = Job(id=job_id, status="pending", progress="")
+        new_job = Job(id=job_id, user_id=user_id, status="pending", progress="")
         db.add(new_job)
         db.commit()
 
@@ -205,6 +214,7 @@ def save_study_guide(
     length_preset: str = None, 
     analogy_preset: str = None, 
     video_duration: str = None,
+    user_id: str = None,
     **kwargs
 ) -> None:
     """
@@ -225,8 +235,10 @@ def save_study_guide(
         length_preset = job_id_or_dto.length_preset
         analogy_preset = job_id_or_dto.analogy_preset
         video_duration = job_id_or_dto.video_duration
+        user_id = getattr(job_id_or_dto, "user_id", None) or user_id
     else:
         job_id = str(job_id_or_dto or kwargs.get("job_id", ""))
+        user_id = user_id or kwargs.get("user_id")
 
     with SessionLocal() as db:
         from backend.services.video import extract_video_id
@@ -249,11 +261,13 @@ def save_study_guide(
             guide.length_preset = length_preset
             guide.analogy_preset = analogy_preset
             guide.video_duration = video_duration
+            if user_id:
+                guide.user_id = user_id
             if not guide.notes:
                 guide.notes = notes_json
         else:
             guide = StudyGuide(
-                id=job_id, video_id=vid, url=url or "", title=title or "", image_url=image_url or "", provider=provider or "youtube",
+                id=job_id, user_id=user_id, video_id=vid, url=url or "", title=title or "", image_url=image_url or "", provider=provider or "youtube",
                 document=doc_json, learning_profile=learning_profile or "", profile_message=profile_message or "",
                 generation_time_sec=generation_time_sec or 0, length_preset=length_preset,
                 analogy_preset=analogy_preset, video_duration=video_duration, notes=notes_json
@@ -261,9 +275,12 @@ def save_study_guide(
             db.add(guide)
         db.commit()
 
-def get_all_study_guides() -> list:
+def get_all_study_guides(user_id: Optional[str] = None) -> list:
     with SessionLocal() as db:
-        guides = db.query(StudyGuide).order_by(StudyGuide.created_at.desc()).all()
+        query = db.query(StudyGuide)
+        if user_id:
+            query = query.filter(or_(StudyGuide.user_id == user_id, StudyGuide.user_id == None))
+        guides = query.order_by(StudyGuide.created_at.desc()).all()
         
         result = []
         for guide in guides:
@@ -279,6 +296,7 @@ def get_all_study_guides() -> list:
                 
             guide_dict = {
                 "id": guide.id,
+                "user_id": guide.user_id,
                 "url": guide.url,
                 "title": guide.title,
                 "image_url": guide.image_url,
@@ -293,6 +311,51 @@ def get_all_study_guides() -> list:
             }
             result.append(guide_dict)
         return result
+
+def check_and_increment_quota(user_id: str, max_daily: int = 3) -> tuple[bool, int, int]:
+    """
+    유저의 일일 가이드 생성 쿼터를 확인하고 원자적으로 1 증가시킵니다.
+    반환값: (is_allowed, current_count, max_limit)
+    """
+    if not user_id:
+        user_id = "anonymous"
+        
+    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    usage_id = f"{user_id}:{date_str}"
+    
+    with SessionLocal() as db:
+        usage = db.query(UserUsage).filter(UserUsage.id == usage_id).first()
+        if not usage:
+            usage = UserUsage(id=usage_id, user_id=user_id, date=date_str, generation_count=0)
+            db.add(usage)
+            db.flush()
+            
+        if usage.generation_count >= max_daily:
+            return False, usage.generation_count, max_daily
+            
+        usage.generation_count += 1
+        usage.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        return True, usage.generation_count, max_daily
+
+def get_user_daily_usage(user_id: str, max_daily: int = 3) -> dict:
+    """유저의 오늘 사용량과 남은 횟수를 반환합니다."""
+    if not user_id:
+        user_id = "anonymous"
+        
+    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    usage_id = f"{user_id}:{date_str}"
+    
+    with SessionLocal() as db:
+        usage = db.query(UserUsage).filter(UserUsage.id == usage_id).first()
+        current_count = usage.generation_count if usage else 0
+        remaining = max(0, max_daily - current_count)
+        return {
+            "date": date_str,
+            "used": current_count,
+            "max": max_daily,
+            "remaining": remaining
+        }
 
 def delete_study_guide(job_id: str) -> bool:
     with SessionLocal() as db:

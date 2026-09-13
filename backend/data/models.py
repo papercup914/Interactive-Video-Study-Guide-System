@@ -8,6 +8,7 @@ class Job(Base):
     __tablename__ = "jobs"
     
     id = Column(String, primary_key=True, index=True)
+    user_id = Column(String, index=True, nullable=True)
     status = Column(String)
     progress = Column(String)
     document = Column(Text, nullable=True) # JSON string
@@ -28,6 +29,7 @@ class StudyGuide(Base):
     __tablename__ = "study_guides"
     
     id = Column(String, primary_key=True, index=True)
+    user_id = Column(String, index=True, nullable=True)
     video_id = Column(String, index=True, nullable=True)
     url = Column(String)
     title = Column(String)
@@ -42,6 +44,15 @@ class StudyGuide(Base):
     analogy_preset = Column(String, nullable=True)
     video_duration = Column(String, nullable=True)
     notes = Column(Text, nullable=True, default="[]") # JSON string
+
+class UserUsage(Base):
+    __tablename__ = "user_usages"
+    
+    id = Column(String, primary_key=True) # format: {user_id}:{date_str} (e.g. user123:2026-09-13)
+    user_id = Column(String, index=True, nullable=False)
+    date = Column(String, index=True, nullable=False) # YYYY-MM-DD
+    generation_count = Column(Integer, default=0, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), onupdate=lambda: datetime.now(timezone.utc))
 
 class BatchJob(Base):
     __tablename__ = "batch_jobs"

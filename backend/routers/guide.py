@@ -6,13 +6,17 @@ from datetime import datetime
 import time
 import shutil
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, File, Form, UploadFile
+from fastapi import APIRouter, BackgroundTasks, HTTPException, File, Form, UploadFile, Depends
 from pydantic import BaseModel
 from typing import Optional, List
 import asyncio
 
-from backend.services.job_manager import create_job, update_job_status, finish_job, fail_job, get_job, cancel_job
-from backend.services.job_manager import save_study_guide, get_all_study_guides, delete_study_guide
+from backend.auth import get_optional_user
+from backend.services.job_manager import (
+    create_job, update_job_status, finish_job, fail_job, get_job, cancel_job,
+    save_study_guide, get_all_study_guides, delete_study_guide,
+    check_and_increment_quota, get_user_daily_usage
+)
 from backend.services.video import extract_video_id
 
 # Import Celery task
@@ -40,10 +44,25 @@ async def start_guide_generation(
     pdf_parsing_method: str = Form("basic"),
     force_refresh: str = Form("false"),
     custom_api_key: str = Form(""),
-    custom_base_url: str = Form("")
+    custom_base_url: str = Form(""),
+    current_user: Optional[dict] = Depends(get_optional_user)
 ):
+    user_id = current_user.get("id") if current_user else None
+    
+    # [일일 쿼터 제한]
+    # 사용자가 직접 API 키(BYOK)를 입력한 경우에는 서버 AI 비용이 발생하지 않으므로 쿼터 제한을 면제합니다.
+    has_byok = bool(custom_api_key and custom_api_key.strip())
+    if not has_byok:
+        quota_target = user_id or "anonymous_guest"
+        allowed, used_count, max_limit = check_and_increment_quota(quota_target, max_daily=3)
+        if not allowed:
+            raise HTTPException(
+                status_code=429,
+                detail=f"오늘 무료 생성 한도({max_limit}회)를 모두 소진하셨습니다. 내일 다시 시도하시거나 커스텀 API 키를 입력해 주세요."
+            )
+
     job_id = f"job_{uuid.uuid4().hex}"
-    create_job(job_id)
+    create_job(job_id, user_id=user_id)
     
     file_paths = []
     if files:
@@ -66,7 +85,8 @@ async def start_guide_generation(
         "pdf_parsing_method": pdf_parsing_method,
         "force_refresh": is_force,
         "custom_api_key": custom_api_key.strip() if custom_api_key else None,
-        "custom_base_url": custom_base_url.strip() if custom_base_url else None
+        "custom_base_url": custom_base_url.strip() if custom_base_url else None,
+        "user_id": user_id
     }
     
     # Launch background task via Celery
@@ -232,15 +252,23 @@ async def cancel_guide_job(job_id: str):
     cancel_job(job_id)
     return {"status": "success", "message": "Job cancelled successfully"}
 
+@router.get("/quota")
+def get_quota_status(current_user: Optional[dict] = Depends(get_optional_user)):
+    """현재 사용자의 오늘 생성 횟수 및 잔여 쿼터를 반환합니다."""
+    user_id = current_user.get("id") if current_user else "anonymous_guest"
+    return get_user_daily_usage(user_id, max_daily=3)
+
 @router.get("/history")
-def get_history():
-    """Returns all history items but without the bulky document content to save bandwidth"""
-    history = get_all_study_guides()
+def get_history(current_user: Optional[dict] = Depends(get_optional_user)):
+    """Returns all history items for the user or public/legacy items, without the bulky document content to save bandwidth"""
+    user_id = current_user.get("id") if current_user else None
+    history = get_all_study_guides(user_id=user_id)
     # Strip document content for the list view
     summary_history = []
     for item in history:
         summary_item = {
             "id": item["id"],
+            "user_id": item.get("user_id"),
             "url": item.get("url", ""),
             "title": item.get("title", "Unknown Title"),
             "image_url": item.get("image_url", "https://images.unsplash.com/photo-1517842645767-c639042777db?q=80&w=800&auto=format&fit=crop"),

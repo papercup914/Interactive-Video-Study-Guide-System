@@ -30,6 +30,16 @@ const nanumPen = Nanum_Pen_Script({
 export const metadata: Metadata = {
   title: "Interactive Video Study Guide System",
   description: "AI-powered study guides from your favorite videos",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "StudyGuide AI",
+  },
+  icons: {
+    icon: "/icons/icon.svg",
+    apple: "/icons/icon.svg",
+  },
 };
 
 export default function RootLayout({

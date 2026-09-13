@@ -1,6 +1,6 @@
 # Interactive Video Study Guide System - 인수인계서 (Handover)
 
-> **최종 갱신 일시**: 2026-09-13 (21:55 KST)  
+> **최종 갱신 일시**: 2026-09-13 (23:55 KST)  
 > **작성자**: Antigravity (AI Pair Programming Assistant)  
 > **문서 목적**: 다음 세션 작업자 및 사용자를 위한 프로젝트 현황, 아키텍처, 최근 해결된 버그 히스토리 및 운영 배포 인수인계
 
@@ -24,7 +24,7 @@ Interactive Video Study Guide System은 유튜브 영상 또는 웹 문서를 �
     * `studyguide-fastapi`: REST API 서버 (Port 8000)
     * `studyguide-celery`: 비동기 AI 파이프라인 워커 (Celery worker, 영상 다운로드/전사/목차/챕터 생성)
     * `studyguide-redis`: 메시지 브로커 및 캐시 (Port 6379)
-  * **데이터베이스**: SQLite (`backend/data/jobs.db`)
+  * **데이터베이스**: Neon Tech 클라우드 PostgreSQL (`ep-divine-frost-axkzt83r...aws.neon.tech/neondb`)
 
 ---
 
@@ -58,6 +58,19 @@ Interactive Video Study Guide System은 유튜브 영상 또는 웹 문서를 �
 * **에스컬레이션 프롬프트 3배 누적 팽창 주장 해명**:
   * 원본 불변 객체인 `base_system_prompt`에 당회차 `escalation`만 결합하므로 재시도가 발생해도 프롬프트가 3배로 불어나지 않음을 규명.
 
+### 2.6 [Track A 완수] Neon PostgreSQL 클라우드 DB 전환, user_id 격리 및 일일 쿼터 안전망 구축
+* **배경 및 목적**:
+  * 기존 SQLite 단일 파일(`jobs.db`)로 인한 Celery 동시성 락 충돌과 미인증/무제한 생성으로 인한 서버 API 키 비용 폭사 위험을 영구 차단하기 위함.
+* **작업 내용**:
+  1. **Docker Compose SQLite 하드코딩 제거**: `docker-compose.yml`에서 `fastapi`와 `celery_worker`의 `DATABASE_URL=sqlite:///./backend/data/jobs.db`를 제거하고, `.env` 및 `backend/.env`의 **Neon PostgreSQL**(`postgresql://neondb_owner:...`)이 최우선 적용되도록 수정.
+  2. **`user_id` 모델링 및 마이그레이션**: `Job` 및 `StudyGuide` 모델에 `user_id` 컬럼 추가, `job_manager.py:init_db_schema()`에서 PostgreSQL 기동 시 자동 컬럼 마이그레이션 적용.
+  3. **일일 쿼터(`UserUsage`) 시스템 구축**: 
+     - `UserUsage` 테이블 신설(`user_id`, `date`, `generation_count`).
+     - 유저당 1일 최대 3회 생성 제한 (`check_and_increment_quota`). 초과 시 `HTTP 429 Too Many Requests` 차단.
+     - BYOK(사용자 본인 API 키 입력)인 경우 서버 비용이 발생하지 않으므로 쿼터 제한 면제.
+     - 사용자 잔여 쿼터 조회 API(`GET /api/guide/quota`) 및 사용자별 가이드 목록 격리(`GET /api/guide/history`) 지원.
+  4. **완전 검증 통과**: `tests/test_track_a_neon_and_quota.py` 실행 결과, Neon PostgreSQL 실제 연결, 스키마 마이그레이션, `user_id` 저장, 3회 허용 및 4회차 429 차단 동작까지 100% 정상 통과 (`Exit code 0`).
+
 ---
 
 ## 3. Notion 버그 리포트 관리 현황
@@ -78,13 +91,14 @@ Interactive Video Study Guide System은 유튜브 영상 또는 웹 문서를 �
 ## 4. 운영 환경 배포 및 명령어 가이드
 
 ### 4.1 로컬 검증 완료 상태
-* **백엔드 컴파일 검증 완료**: `tasks.py`, `chapter.py`, `outline.py`, `validators.py`, `chapter_guide.py` (Exit code 0)
+* **백엔드 컴파일 검증 완료**: `tasks.py`, `chapter.py`, `outline.py`, `validators.py`, `models.py`, `job_manager.py`, `auth.py`, `guide.py` (Exit code 0)
+* **PostgreSQL 및 쿼터 단위 테스트 완료**: `python tests/test_track_a_neon_and_quota.py` (Exit code 0)
 * **프론트엔드 Turbopack 빌드 완료**: `cd frontend && npm run build` (Exit code 0)
 
 ### 4.2 Git 커밋 및 Vercel 자동 배포
 ```bash
 git add .
-git commit -m "fix(pipeline): remove IT bias in fallback synthesis, inject raw_title to outline/chapter prompts, strengthen korean validation"
+git commit -m "feat(infra): migrate to Neon PostgreSQL, add user_id isolation and daily quota rate-limiting"
 git push origin main
 ```
 
@@ -93,23 +107,24 @@ git push origin main
 # 1. EC2 접속 및 최신 코드 동기화
 ssh -i "aws/studyguide-key.pem" -o StrictHostKeyChecking=no ubuntu@13.209.73.143 "cd /home/ubuntu/Interactive-Video-Study-Guide-System && git pull origin main"
 
-# 2. 도커 컨테이너 리빌드 및 재기동
+# 2. 도커 컨테이너 리빌드 및 재기동 (Neon PostgreSQL 자동 연결)
 ssh -i "aws/studyguide-key.pem" -o StrictHostKeyChecking=no ubuntu@13.209.73.143 "cd /home/ubuntu/Interactive-Video-Study-Guide-System && docker compose build celery_worker fastapi && docker compose up -d celery_worker fastapi"
 
 # 3. 실시간 컨테이너 상태 및 로그 확인
 ssh -i "aws/studyguide-key.pem" -o StrictHostKeyChecking=no ubuntu@13.209.73.143 "docker compose -f /home/ubuntu/Interactive-Video-Study-Guide-System/docker-compose.yml ps"
-ssh -i "aws/studyguide-key.pem" -o StrictHostKeyChecking=no ubuntu@13.209.73.143 "docker logs --tail 100 studyguide-celery"
+ssh -i "aws/studyguide-key.pem" -o StrictHostKeyChecking=no ubuntu@13.209.73.143 "docker logs --tail 100 studyguide-fastapi"
 ```
 
 ---
 
 ## 5. 다음 세션 인수인계 지침
 
-1. **새 세션 시작 시**:
-   * 본 `handover.md`를 최우선으로 검토하고 이전 작업 맥락과 현재 진행 상태를 사용자에게 브리핑한 후 작업을 개시할 것.
-2. **`In Progress` 리포트 확인**:
-   * 현재 `[Bug Report] 목차 안전망의 맹탕 질문형 챕터명 및 본문 내 기계적 주어 반복 노출 이슈`가 `In Progress` 상태입니다.
-   * 사용자가 실제 웹 서비스에서 새로 생성된 가이드를 확인하고 피드백을 주면, 사용자의 승인에 따라 해당 노션 페이지의 상태를 `Resolved`로 업데이트할 것.
+1. **새 세션 시작 시 (Track B 전담)**:
+   * 본 `HANDOVER.md`를 최우선으로 검토하고 이전 작업 맥락(Track A 완수)과 현재 진행 상태를 사용자에게 브리핑한 후 작업을 개시할 것.
+2. **Track B 핵심 과제 착수**:
+   * 현재 `In Progress` 상태인 `[Bug Report] 목차 안전망의 맹탕 질문형 챕터명 및 본문 내 기계적 주어 반복 노출 이슈`를 해결할 것.
+   * `backend/services/outline.py`의 휴리스틱 질문형 목차 폴백 로직을 도메인 맞춤형 서술식 챕터명으로 전면 개편.
+   * `backend/prompts/chapter_guide.py`에 `"이 영상은~"`, `"화자는~"` 등 기계적 3인칭 주어 반복 금지 가드레일 주입 및 검증.
 3. **코드 수정 시 필수 원칙 준수**:
    * 한국어 응답 원칙 준수.
    * 모든 수정 후 TypeScript / Python 에러 체크 필수.

@@ -117,3 +117,28 @@ async def get_current_user(
             detail="Could not validate credentials.",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+async def get_optional_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+) -> Optional[Dict[str, Any]]:
+    """
+    Optional authentication dependency.
+    Returns user dict if valid Bearer token is provided.
+    Returns None if no token or token is invalid, without raising 401 error.
+    """
+    if not credentials or not credentials.credentials:
+        # Check if local dev with auth disabled
+        app_env = os.getenv("APP_ENV", "development").lower()
+        if app_env in ("development", "dev", "local") and is_auth_disabled():
+            return {
+                "id": "dev-user-0001",
+                "email": "developer@localhost.local",
+                "role": "authenticated",
+                "is_dev": True,
+            }
+        return None
+
+    try:
+        return await get_current_user(credentials)
+    except Exception:
+        return None

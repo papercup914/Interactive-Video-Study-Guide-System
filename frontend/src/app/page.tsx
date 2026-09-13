@@ -8,6 +8,7 @@ import {
   AlertTriangle, Settings, Timer, Layers, ChevronRight, CheckCircle2, Grid, Key
 } from "lucide-react";
 import { useTask } from "@/app/contexts/TaskContext";
+import { createClient } from "@/utils/supabase/client";
 
 export type HistoryItem = {
   id: string;
@@ -411,6 +412,7 @@ export default function Home() {
   
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
+  const [quotaInfo, setQuotaInfo] = useState<{ used: number; max: number; remaining: number } | null>(null);
 
   // Global Job state
   const { isGenerating, startTask, status } = useTask();
@@ -421,7 +423,27 @@ export default function Home() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
 
+  const fetchQuota = async () => {
+    try {
+      const supabase = createClient();
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      
+      const res = await fetch("/api/guide/quota", { headers });
+      if (res.ok) {
+        const data = await res.json();
+        setQuotaInfo(data);
+      }
+    } catch (err) {
+      console.error("Failed to fetch quota", err);
+    }
+  };
+
   useEffect(() => {
+    fetchQuota();
     if (status === "idle" || status === "completed") {
       fetchHistory();
     }
@@ -429,7 +451,14 @@ export default function Home() {
 
   const fetchHistory = async () => {
     try {
-      const res = await fetch("/api/guide/history");
+      const supabase = createClient();
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const res = await fetch("/api/guide/history", { headers });
       if (res.ok) {
         const data = await res.json();
         setHistory(Array.isArray(data) ? data : []);
@@ -491,9 +520,17 @@ export default function Home() {
       if (files.length > 0) {
         files.forEach(f => formData.append("files", f));
       }
+
+      const supabase = createClient();
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
       
       const res = await fetch("/api/guide/start", {
         method: "POST",
+        headers,
         body: formData
       });
       
@@ -511,6 +548,12 @@ export default function Home() {
           if (text) errorDetail = text.slice(0, 100);
         }
 
+        if (res.status === 429) {
+          alert(`⚠️ 생성 한도 초과: ${errorDetail}\n\n[커스텀 API 키(BYOK)]를 등록하시면 무제한으로 이용하실 수 있습니다.`);
+          setShowByokModal(true);
+          return;
+        }
+
         if (res.status === 401) {
           alert("로그인 세션이 만료되었습니다. 다시 로그인해 주세요.");
           router.push("/login");
@@ -524,6 +567,7 @@ export default function Home() {
       const data = await res.json();
       if (data?.job_id) {
         startTask(data.job_id);
+        fetchQuota(); // 쿼터 차감 후 즉시 UI 업데이트
       } else {
         alert("생성 시작에 실패했습니다. (Job ID가 생성되지 않음)");
       }
@@ -579,9 +623,32 @@ export default function Home() {
           <h1 className="font-headline-lg text-headline-lg-mobile md:text-headline-lg text-foreground mb-4 tracking-tight">
             Transform your videos into study guides
           </h1>
-          <p className="font-body-lg text-body-lg text-muted-foreground mb-8 max-w-2xl mx-auto">
+          <p className="font-body-lg text-body-lg text-muted-foreground mb-4 max-w-2xl mx-auto">
             긴 영상과 복잡한 문서를 9종 맞춤형 스터디 노트로 즉시 변환하세요.
           </p>
+
+          {/* 일일 무료 쿼터 상태 배지 */}
+          {quotaInfo && (
+            <div className="mb-6 flex items-center justify-center">
+              <div className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+                quotaInfo.remaining > 0 
+                  ? "bg-primary/10 text-primary border-primary/20 shadow-sm" 
+                  : "bg-amber-500/10 text-amber-500 border-amber-500/30 shadow-sm"
+              }`}>
+                <Sparkles size={13} className={quotaInfo.remaining > 0 ? "text-primary animate-pulse" : "text-amber-500"} />
+                <span>오늘 무료 생성 한도: <strong className="font-bold">{quotaInfo.remaining}/{quotaInfo.max}회</strong> 남음</span>
+                {quotaInfo.remaining === 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowByokModal(true)}
+                    className="ml-1 text-[11px] underline font-bold hover:text-amber-600 cursor-pointer"
+                  >
+                    (BYOK 키 등록 시 무제한)
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
           <form onSubmit={handleStart} className="w-full bg-surface border border-border-subtle rounded-2xl shadow-sm p-2 flex flex-col gap-2 relative transition-all focus-within:ring-2 focus-within:ring-foreground" suppressHydrationWarning>
             <div className="flex items-center gap-2 p-2">

@@ -4,7 +4,7 @@ import React, { useEffect, useState, use, useRef, useMemo, useCallback } from "r
 import { useRouter } from "next/navigation";
 import { 
   ArrowLeft, Loader2, PanelLeftClose, PanelLeftOpen, Trash2, 
-  Sparkles, BookOpen, MessageSquare 
+  Sparkles, BookOpen, MessageSquare, Download, Copy, Check 
 } from "lucide-react";
 import { Virtuoso } from "react-virtuoso";
 
@@ -42,6 +42,7 @@ export default function GuideViewer({ params }: { params: Promise<{ jobId: strin
   const [siblingPresets, setSiblingPresets] = useState<Record<string, PresetInfo>>({});
   const [totalSiblingPresets, setTotalSiblingPresets] = useState<number>(1);
   const [showPresetMatrix, setShowPresetMatrix] = useState<boolean>(false);
+  const [copied, setCopied] = useState<boolean>(false);
   
   // 파인만 / 인터랙티브 학습 모드 On/Off 상태 (몰입 읽기 모드)
   const [isInteractiveMode, setIsInteractiveMode] = useState<boolean>(true);
@@ -555,9 +556,98 @@ export default function GuideViewer({ params }: { params: Promise<{ jobId: strin
     if (!urlStr) return null;
     const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
     const match = urlStr.match(regExp);
-    return (match && match[2].length === 11) ? `https://www.youtube.com/embed/${match[2]}` : null;
+    return (match && match[2].length === 11) ? `https://www.youtube.com/embed/${match[2]}?enablejsapi=1` : null;
   };
   const embedUrl = getYoutubeEmbedUrl(url);
+
+  // 타임스탬프 클릭 시 비디오 점프 (seekTo) 함수
+  const seekToTime = useCallback((seconds: number) => {
+    const iframe = window.document.getElementById("youtube-player-iframe") as HTMLIFrameElement;
+    if (iframe && iframe.contentWindow) {
+      setIsLeftPanelOpen(true);
+      iframe.contentWindow.postMessage(
+        JSON.stringify({
+          event: "command",
+          func: "seekTo",
+          args: [seconds, true]
+        }),
+        "*"
+      );
+      iframe.contentWindow.postMessage(
+        JSON.stringify({
+          event: "command",
+          func: "playVideo",
+          args: []
+        }),
+        "*"
+      );
+    }
+  }, []);
+
+  // 전역 타임스탬프 클릭 리스너 (가이드 내 [02:15] 형식 클릭 시 비디오 점프)
+  useEffect(() => {
+    const handleGlobalTimestampClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target) return;
+      const text = target.textContent || "";
+      const match = text.match(/\[?(\d{1,2}):(\d{2})(?::(\d{2}))?\]?/);
+      if (match && (target.tagName === "BUTTON" || target.tagName === "A" || target.classList.contains("timestamp") || target.closest(".timestamp-btn"))) {
+        e.preventDefault();
+        let totalSec = 0;
+        if (match[3]) {
+          totalSec = parseInt(match[1]) * 3600 + parseInt(match[2]) * 60 + parseInt(match[3]);
+        } else {
+          totalSec = parseInt(match[1]) * 60 + parseInt(match[2]);
+        }
+        seekToTime(totalSec);
+      }
+    };
+    window.addEventListener("click", handleGlobalTimestampClick);
+    return () => window.removeEventListener("click", handleGlobalTimestampClick);
+  }, [seekToTime]);
+
+  // 마크다운 생성 헬퍼
+  const generateExportMarkdown = useCallback(() => {
+    if (!document) return "";
+    let md = `# ${title || "학습 가이드"}\n\n`;
+    if (url) md += `> **원본 링크**: [${url}](${url})\n\n`;
+    if (profileMessage) md += `> 💡 ${profileMessage}\n\n`;
+    md += `---\n\n`;
+    
+    for (const [sectionName, content] of Object.entries(document)) {
+      md += `## ${sectionName}\n\n`;
+      md += `${content}\n\n`;
+      md += `---\n\n`;
+    }
+    return md;
+  }, [document, title, url, profileMessage]);
+
+  // 마크다운 파일(.md) 다운로드
+  const handleDownloadMarkdown = useCallback(() => {
+    const md = generateExportMarkdown();
+    if (!md) return;
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8;" });
+    const downloadUrl = URL.createObjectURL(blob);
+    const a = window.document.createElement("a");
+    a.href = downloadUrl;
+    const sanitizedTitle = (title || "study_guide").replace(/[^a-zA-Z0-9가-힣_-]/g, "_").slice(0, 40);
+    a.download = `${sanitizedTitle}.md`;
+    a.click();
+    URL.revokeObjectURL(downloadUrl);
+  }, [generateExportMarkdown, title]);
+
+  // 노션(Notion) 마크다운 클립보드 복사
+  const handleCopyForNotion = useCallback(async () => {
+    const md = generateExportMarkdown();
+    if (!md) return;
+    try {
+      await navigator.clipboard.writeText(md);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      alert("클립보드 복사에 실패했습니다.");
+    }
+  }, [generateExportMarkdown]);
 
   if (loading) {
     return (
@@ -607,7 +697,33 @@ export default function GuideViewer({ params }: { params: Promise<{ jobId: strin
             <button className="font-label-md text-label-md text-primary-container border-b-2 border-primary-container pb-1 transition-colors cursor-pointer">Learning Guide</button>
           </div>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
+          {/* 내보내기 액션 버튼 그룹 */}
+          <div className="flex items-center gap-1.5 border-r border-border-subtle pr-3">
+            <button
+              type="button"
+              onClick={handleDownloadMarkdown}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-surface-variant hover:bg-surface-container-high text-text-primary transition-colors cursor-pointer border border-border-subtle shadow-xs active:scale-95"
+              title="Markdown(.md) 파일로 전체 다운로드"
+            >
+              <Download size={14} className="text-primary-container" />
+              <span className="hidden sm:inline">MD 다운로드</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleCopyForNotion}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer border shadow-xs active:scale-95 ${
+                copied 
+                  ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/30" 
+                  : "bg-surface-variant hover:bg-surface-container-high text-text-primary border-border-subtle"
+              }`}
+              title="Notion에 바로 붙여넣을 수 있게 전체 마크다운 복사"
+            >
+              {copied ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} className="text-primary-container" />}
+              <span className="hidden sm:inline">{copied ? "복사 완료!" : "Notion 복사"}</span>
+            </button>
+          </div>
+
           <button onClick={() => router.push("/")} className="bg-primary-container text-on-primary hover:bg-hover-indigo px-4 py-2 rounded font-label-md text-label-md transition-colors hidden md:block">서재로 돌아가기</button>
           <button onClick={() => router.push("/")} className="md:hidden text-muted-foreground"><ArrowLeft size={20}/></button>
           <div className="flex gap-2 text-muted-foreground">

@@ -1,0 +1,37 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4f46e5"/>
+      <stop offset="100%" stop-color="#312e81"/>
+    </linearGradient>
+    <linearGradient id="book" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#e0e7ff"/>
+    </linearGradient>
+  </defs>
+  <!-- Background with rounded corners -->
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  
+  <!-- Outer Glow Circle -->
+  <circle cx="256" cy="256" r="180" fill="#6366f1" opacity="0.25"/>
+
+  <!-- Book Icon -->
+  <g transform="translate(106, 126)">
+    <!-- Book Spine & Pages -->
+    <path d="M150 50 C120 20, 40 20, 10 35 L10 240 C40 225, 120 225, 150 255 C180 225, 260 225, 290 240 L290 35 C260 20, 180 20, 150 50 Z" 
+          fill="url(#book)" stroke="#ffffff" stroke-width="8" stroke-linejoin="round"/>
+    <!-- Center Spine Divider -->
+    <path d="M150 50 L150 255" stroke="#4f46e5" stroke-width="8" stroke-linecap="round"/>
+    <!-- Page Lines Left -->
+    <path d="M45 80 C80 72, 115 75, 130 85 M45 120 C80 112, 115 115, 130 125 M45 160 C80 152, 115 155, 130 165" 
+          stroke="#c7d2fe" stroke-width="6" stroke-linecap="round"/>
+    <!-- Page Lines Right -->
+    <path d="M255 80 C220 72, 185 75, 170 85 M255 120 C220 112, 185 115, 170 125 M255 160 C220 152, 185 155, 170 165" 
+          stroke="#c7d2fe" stroke-width="6" stroke-linecap="round"/>
+  </g>
+
+  <!-- Sparkle Star (Top Right) -->
+  <g transform="translate(350, 90)">
+    <path d="M30 0 C30 18, 42 30, 60 30 C42 30, 30 42, 30 60 C30 42, 18 30, 0 30 C18 30, 30 18, 30 0 Z" fill="#fbbf24"/>
+  </g>
+</svg>
