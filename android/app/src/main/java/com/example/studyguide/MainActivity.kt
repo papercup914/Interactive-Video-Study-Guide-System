@@ -73,7 +73,8 @@ fun StudyGuideApp() {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { context ->
-                WebView(context).apply {
+                val webView = WebView(context)
+                webView.apply {
                     layoutParams = ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT
@@ -93,7 +94,7 @@ fun StudyGuideApp() {
 
                     CookieManager.getInstance().apply {
                         setAcceptCookie(true)
-                        setAcceptThirdPartyCookies(this@apply, true)
+                        setAcceptThirdPartyCookies(webView, true)
                     }
 
                     webViewClient = object : WebViewClient() {
