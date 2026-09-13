@@ -50,9 +50,11 @@ export async function updateSession(request: NextRequest) {
   const isLoginPage = pathname === '/login';
   const isAuthCallback = pathname.startsWith('/auth/callback');
   const isApiRoute = pathname.startsWith('/api/');
+  const isAdminRoute = pathname.startsWith('/admin');
 
-  // 백엔드 API 라우트는 FastAPI가 자체적으로 게스트/인증을 처리하므로 미들웨어에서 401로 차단하지 않고 통과
-  if (isApiRoute) {
+  // 백엔드 API 라우트(/api/)는 FastAPI가 게스트/인증을 처리하고,
+  // 관리자 페이지(/admin)는 자체 마스터 패스코드(studyguide-admin-2026)로 인증하므로 통과
+  if (isApiRoute || isAdminRoute) {
     return supabaseResponse;
   }
 

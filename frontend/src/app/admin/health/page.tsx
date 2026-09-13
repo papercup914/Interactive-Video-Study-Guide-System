@@ -26,7 +26,7 @@ export default function AdminHealthPage() {
   const timeRanges: ('24h' | '7d' | '30d')[] = ['24h', '7d', '30d'];
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-4 sm:p-6 lg:p-8 space-y-6">
+    <div className="space-y-6">
       {/* Dashboard Top Navigation Header */}
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-slate-800">
         <div>
@@ -38,7 +38,7 @@ export default function AdminHealthPage() {
               <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-white flex items-center gap-2">
                 시스템 상태 및 에러 모니터
                 <span className="text-xs px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-medium">
-                  관리자 라우트
+                  로그 모니터링
                 </span>
               </h1>
               <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
@@ -50,6 +50,12 @@ export default function AdminHealthPage() {
 
         {/* Time Range Selector & Tab Navigation */}
         <div className="flex items-center space-x-3 self-start md:self-auto">
+          <Link
+            href="/admin"
+            className="px-3.5 py-1.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-indigo-500/50 text-slate-300 hover:text-white text-xs font-bold transition-all flex items-center gap-1.5"
+          >
+            📊 관리자 허브
+          </Link>
           <Link
             href="/admin/batch"
             className="px-3.5 py-1.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-indigo-500/50 text-indigo-400 hover:text-indigo-300 text-xs font-bold transition-all flex items-center gap-1.5"

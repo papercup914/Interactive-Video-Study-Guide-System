@@ -1,6 +1,6 @@
 # Interactive Video Study Guide System - 인수인계서 (Handover)
 
-> **최종 갱신 일시**: 2026-09-14 (01:25 KST)  
+> **최종 갱신 일시**: 2026-09-14 (02:05 KST)  
 > **작성자**: Antigravity (AI Pair Programming Assistant)  
 > **문서 목적**: 다음 세션 작업자 및 사용자를 위한 프로젝트 현황, 아키텍처, 최근 해결된 버그 히스토리 및 운영 배포 인수인계
 
@@ -93,6 +93,25 @@ Interactive Video Study Guide System은 유튜브 영상 또는 웹 문서를 �
      * GitHub Actions 클라우드 빌드 성공 (Build #34767765608).
      * 로컬 테스트용 APK 파일 수령 완료: `apk_output/studyguide-debug-apk/app-debug.apk` (약 11.9 MB).
      * `.gitignore`에 APK 및 빌드 캐시 디렉토리 등록 (`684aa31`).
+
+### 2.8 [개발자용 관리 페이지 C안] 통합 관리자 대시보드 허브(`/admin`) 구축 및 패스코드(A안) 보안 가드 완비
+* **배경**:
+  * 기존 `/admin/batch`(일괄 생성)와 `/admin/health`(로그 모니터링)로 분산되어 있던 관리 도구를 일원화하고, 비인가자의 DB 임의 조작 방지를 위한 보안 인증 및 실시간 Celery/쿼터 제어 포털 구축.
+* **구현 내용**:
+  1. **A안 패스코드(Secret Key) 인증 가드 (`/admin/layout.tsx`)**:
+     * 비인가 접근 차단 모달, 로컬스토리지 보관 및 모든 API 헤더(`X-Admin-Secret`) 자동 주입.
+     * 상단 네비게이션에 [대시보드 허브], [일괄 생성], [시스템 헬스], [잠금/로그아웃] 일관 적용.
+  2. **메인 관리자 대시보드 허브 (`/admin/page.tsx`)**:
+     * **인프라 헬스 실시간 Ping**: Neon PostgreSQL, Redis, Celery Worker 상태 감지.
+     * **핵심 지표 요약**: 총 가이드 수, 오늘 생성 요청 수, 실시간 대기 작업, 실패율.
+     * **작업 & 큐 탭 (`jobs`)**: 실시간 Job 목록, 상태별 필터링, 실패 작업 [1-Click 재시도], 진행 중 작업 [강제 취소], [삭제], 에러 스택 트레이스 모달.
+     * **사용자 쿼터 탭 (`quota`)**: 당일 사용자별 사용량(`UserUsage`) 실시간 조회 및 [⚡ 0회로 초기화(Reset)] 지원.
+     * **학습 가이드 DB 탭 (`guides`)**: 저장된 가이드 검색, [뷰어로 열기], [삭제].
+  3. **백엔드 관리자 API 신설 (`routers/admin.py`, `job_manager.py`)**:
+     * `verify`, `overview`, `jobs(list/retry/cancel/delete)`, `users/usage`, `reset-quota`, `guides(list/delete)` 완비.
+* **검증 결과**:
+  * 백엔드 단위 테스트 `tests/test_admin_c_plan.py` (3개 테스트 전체 통과, Exit code 0).
+  * 프론트엔드 Next.js 프로덕션 빌드 (`npm run build`) 무결점 성공 (Exit code 0).
 
 ---
 

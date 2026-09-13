@@ -366,6 +366,135 @@ def delete_study_guide(job_id: str) -> bool:
             return True
         return False
 
+# ==================== ADMIN DASHBOARD MANAGEMENT ====================
+
+def get_admin_jobs(limit: int = 50, offset: int = 0, status: Optional[str] = None, search: Optional[str] = None) -> dict:
+    """관리자용 전체 Job 목록을 페이징, 상태 필터링, 검색어로 조회합니다."""
+    with SessionLocal() as db:
+        query = db.query(Job)
+        if status and status.lower() != "all":
+            query = query.filter(Job.status == status.lower())
+        if search and search.strip():
+            s = f"%{search.strip()}%"
+            query = query.filter(or_(Job.id.ilike(s), Job.title.ilike(s), Job.url.ilike(s), Job.user_id.ilike(s)))
+            
+        total_count = query.count()
+        jobs = query.order_by(Job.created_at.desc()).offset(offset).limit(limit).all()
+        
+        result_items = []
+        for j in jobs:
+            result_items.append({
+                "id": j.id,
+                "user_id": j.user_id,
+                "status": j.status or "unknown",
+                "progress": j.progress or "",
+                "url": j.url or "",
+                "title": j.title or "제목 없음",
+                "error": j.error,
+                "created_at": _format_datetime(j.created_at)
+            })
+            
+        return {
+            "total": total_count,
+            "items": result_items,
+            "limit": limit,
+            "offset": offset
+        }
+
+def retry_job(job_id: str) -> Optional[dict]:
+    """실패하거나 중단된 Job의 상태를 pending으로 리셋하고 에러를 초기화합니다."""
+    with SessionLocal() as db:
+        job = db.query(Job).filter(Job.id == job_id).first()
+        if not job:
+            return None
+        job.status = "pending"
+        job.progress = "작업 재시도 대기 중..."
+        job.error = None
+        db.commit()
+        return {
+            "id": job.id,
+            "url": job.url,
+            "user_id": job.user_id,
+            "status": job.status
+        }
+
+def delete_job(job_id: str) -> bool:
+    """Job 및 연관된 Checkpoint 레코드를 삭제합니다."""
+    with SessionLocal() as db:
+        job = db.query(Job).filter(Job.id == job_id).first()
+        if not job:
+            return False
+        # 체크포인트 삭제
+        db.query(JobCheckpoint).filter(JobCheckpoint.job_id == job_id).delete()
+        db.delete(job)
+        db.commit()
+        return True
+
+def get_all_user_usages(target_date: Optional[str] = None, limit: int = 50) -> List[dict]:
+    """모든 사용자의 쿼터 사용 현황을 조회합니다."""
+    if not target_date:
+        target_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    with SessionLocal() as db:
+        usages = db.query(UserUsage).filter(UserUsage.date == target_date).order_by(UserUsage.generation_count.desc()).limit(limit).all()
+        result = []
+        for u in usages:
+            result.append({
+                "id": u.id,
+                "user_id": u.user_id,
+                "date": u.date,
+                "generation_count": u.generation_count,
+                "updated_at": _format_datetime(u.updated_at)
+            })
+        return result
+
+def reset_user_quota(user_id: str, target_date: Optional[str] = None) -> bool:
+    """특정 사용자의 당일 생성 카운트를 0으로 초기화합니다."""
+    if not target_date:
+        target_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    usage_id = f"{user_id}:{target_date}"
+    with SessionLocal() as db:
+        usage = db.query(UserUsage).filter(UserUsage.id == usage_id).first()
+        if usage:
+            usage.generation_count = 0
+            usage.updated_at = datetime.now(timezone.utc)
+            db.commit()
+            return True
+        else:
+            # 아직 레코드가 없다면 0 카운트 레코드 생성
+            usage = UserUsage(id=usage_id, user_id=user_id, date=target_date, generation_count=0)
+            db.add(usage)
+            db.commit()
+            return True
+
+def get_admin_study_guides(limit: int = 50, offset: int = 0, search: Optional[str] = None) -> dict:
+    """관리자용 StudyGuide 목록을 페이징 및 검색하여 반환합니다."""
+    with SessionLocal() as db:
+        query = db.query(StudyGuide)
+        if search and search.strip():
+            s = f"%{search.strip()}%"
+            query = query.filter(or_(StudyGuide.id.ilike(s), StudyGuide.title.ilike(s), StudyGuide.url.ilike(s), StudyGuide.user_id.ilike(s)))
+        total_count = query.count()
+        guides = query.order_by(StudyGuide.created_at.desc()).offset(offset).limit(limit).all()
+        items = []
+        for g in guides:
+            items.append({
+                "id": g.id,
+                "user_id": g.user_id,
+                "video_id": g.video_id,
+                "url": g.url,
+                "title": g.title or "제목 없음",
+                "image_url": g.image_url,
+                "provider": g.provider,
+                "generation_time_sec": g.generation_time_sec,
+                "created_at": _format_datetime(g.created_at)
+            })
+        return {
+            "total": total_count,
+            "items": items,
+            "limit": limit,
+            "offset": offset
+        }
+
 # ==================== BATCH JOB MANAGEMENT ====================
 
 def create_batch_job(

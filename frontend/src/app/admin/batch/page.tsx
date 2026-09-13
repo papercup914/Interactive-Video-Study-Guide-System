@@ -272,10 +272,16 @@ export default function BatchGeneratorPage() {
 
           <div className="flex items-center gap-2.5 self-start md:self-auto">
             <Link 
+              href="/admin" 
+              className="px-4 py-2 text-xs font-bold rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-all"
+            >
+              📊 관리자 허브
+            </Link>
+            <Link 
               href="/admin/health" 
               className="px-4 py-2 text-xs font-bold rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-all"
             >
-              📊 시스템 헬스 로그
+              🩺 시스템 헬스 로그
             </Link>
             <Link 
               href="/admin/batch" 

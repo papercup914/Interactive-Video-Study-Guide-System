@@ -411,3 +411,232 @@ async def receive_synced_guides(
         "total_received": len(payload.guides)
     }
 
+# ==================== ADMIN HUB & MANAGEMENT APIs (C-PLAN) ====================
+
+from pydantic import BaseModel
+from backend.services.job_manager import (
+    get_admin_jobs,
+    retry_job,
+    delete_job,
+    cancel_job,
+    get_all_user_usages,
+    reset_user_quota,
+    get_admin_study_guides,
+    delete_study_guide
+)
+
+class AdminVerifyRequest(BaseModel):
+    secret: str
+
+def check_admin_secret(x_admin_secret: Optional[str] = Header(None, alias="X-Admin-Secret")):
+    expected = os.getenv("ADMIN_SECRET_KEY", "studyguide-admin-2026").strip()
+    if not x_admin_secret or x_admin_secret.strip() != expected:
+        raise HTTPException(status_code=401, detail="관리자 패스코드가 올바르지 않거나 누락되었습니다.")
+    return True
+
+@router.post("/verify")
+async def verify_admin_secret(req: AdminVerifyRequest):
+    """클라이언트가 입력한 관리자 패스코드를 검증합니다."""
+    expected = os.getenv("ADMIN_SECRET_KEY", "studyguide-admin-2026").strip()
+    is_valid = bool(req.secret and req.secret.strip() == expected)
+    return {"valid": is_valid}
+
+@router.get("/overview")
+async def get_admin_overview(
+    _: bool = Depends(check_admin_secret) if "Depends" in globals() else None,
+    x_admin_secret: Optional[str] = Header(None, alias="X-Admin-Secret")
+):
+    """시스템 인프라(DB, Redis, Celery) 상태 및 메인 메트릭 요약을 반환합니다."""
+    # 패스코드 확인
+    check_admin_secret(x_admin_secret)
+
+    now = datetime.now(timezone.utc)
+    today_str = now.strftime("%Y-%m-%d")
+
+    # 1. DB 핑 및 통계
+    db_status = "error"
+    stats = {
+        "total_jobs": 0,
+        "completed_jobs": 0,
+        "failed_jobs": 0,
+        "processing_jobs": 0,
+        "cancelled_jobs": 0,
+        "today_jobs": 0,
+        "total_guides": 0,
+        "active_users_today": 0
+    }
+    try:
+        from backend.data.database import SessionLocal
+        from backend.data.models import Job, StudyGuide, UserUsage
+        with SessionLocal() as db:
+            from sqlalchemy import func, text
+            db.execute(text("SELECT 1"))
+            db_status = "connected"
+
+            stats["total_jobs"] = db.query(Job).count()
+            stats["completed_jobs"] = db.query(Job).filter(Job.status == "completed").count()
+            stats["failed_jobs"] = db.query(Job).filter(Job.status == "failed").count()
+            stats["processing_jobs"] = db.query(Job).filter(Job.status.in_(["processing", "transcribing", "generating_outline", "generating_chapters"])).count()
+            stats["cancelled_jobs"] = db.query(Job).filter(Job.status == "cancelled").count()
+            stats["today_jobs"] = db.query(Job).filter(func.to_char(Job.created_at, 'YYYY-MM-DD') == today_str).count() if "postgresql" in str(db.bind.url) else db.query(Job).count()
+            stats["total_guides"] = db.query(StudyGuide).count()
+            stats["active_users_today"] = db.query(UserUsage).filter(UserUsage.date == today_str).count()
+    except Exception as e:
+        db_status = f"error: {str(e)}"
+
+    # 2. Redis 핑
+    redis_status = "error"
+    try:
+        import redis
+        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        r = redis.from_url(redis_url, socket_timeout=2)
+        if r.ping():
+            redis_status = "connected"
+    except Exception as e:
+        redis_status = f"disconnected ({type(e).__name__})"
+
+    # 3. Celery 핑
+    celery_status = "idle"
+    try:
+        from backend.celery_app import celery_app
+        inspector = celery_app.control.inspect(timeout=1.5)
+        active_workers = inspector.ping()
+        if active_workers:
+            worker_count = len(active_workers)
+            celery_status = f"active ({worker_count} worker{'s' if worker_count > 1 else ''})"
+        else:
+            celery_status = "offline"
+    except Exception:
+        celery_status = "offline"
+
+    return {
+        "status": "success",
+        "timestamp": now.isoformat(),
+        "infrastructure": {
+            "database": db_status,
+            "redis": redis_status,
+            "celery": celery_status
+        },
+        "stats": stats
+    }
+
+@router.get("/jobs")
+async def list_admin_jobs(
+    limit: int = 30,
+    offset: int = 0,
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+    x_admin_secret: Optional[str] = Header(None, alias="X-Admin-Secret")
+):
+    """관리자용 전체 작업(Job) 목록 조회 API"""
+    check_admin_secret(x_admin_secret)
+    data = get_admin_jobs(limit=limit, offset=offset, status=status, search=search)
+    return {"status": "success", **data}
+
+@router.post("/jobs/{job_id}/retry")
+async def retry_admin_job(
+    job_id: str,
+    x_admin_secret: Optional[str] = Header(None, alias="X-Admin-Secret")
+):
+    """실패한 작업을 리셋하고 Celery 파이프라인에 재인입합니다."""
+    check_admin_secret(x_admin_secret)
+    job_info = retry_job(job_id)
+    if not job_info:
+        raise HTTPException(status_code=404, detail="해당 작업을 찾을 수 없습니다.")
+
+    url = job_info.get("url")
+    if not url:
+        raise HTTPException(status_code=400, detail="작업에 등록된 URL 정보가 없어 재시도할 수 없습니다.")
+
+    # Celery 작업 비동기 재발행
+    try:
+        from backend.services.tasks import celery_generate_guide_task
+        celery_generate_guide_task.delay(
+            job_id=job_id,
+            request_data={
+                "url": url,
+                "provider": "Google Gemini",
+                "length_preset": "아주 상세하게",
+                "analogy_preset": "풍부한 비유",
+                "user_id": job_info.get("user_id")
+            },
+            file_paths=None
+        )
+    except Exception as e:
+        # Celery 연결 실패 시 알림
+        return {
+            "status": "partial_success",
+            "message": f"작업 상태는 pending으로 리셋되었으나 Celery 큐 인입 실패: {str(e)}"
+        }
+
+    return {"status": "success", "message": f"작업 {job_id}가 재시도 대기열에 등록되었습니다."}
+
+@router.post("/jobs/{job_id}/cancel")
+async def cancel_admin_job(
+    job_id: str,
+    x_admin_secret: Optional[str] = Header(None, alias="X-Admin-Secret")
+):
+    """진행 중인 작업을 강제로 취소합니다."""
+    check_admin_secret(x_admin_secret)
+    cancel_job(job_id)
+    return {"status": "success", "message": f"작업 {job_id}가 취소 처리되었습니다."}
+
+@router.delete("/jobs/{job_id}")
+async def delete_admin_job(
+    job_id: str,
+    x_admin_secret: Optional[str] = Header(None, alias="X-Admin-Secret")
+):
+    """작업 레코드를 데이터베이스에서 삭제합니다."""
+    check_admin_secret(x_admin_secret)
+    success = delete_job(job_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="작업을 찾을 수 없거나 삭제에 실패했습니다.")
+    return {"status": "success", "message": f"작업 {job_id}가 영구 삭제되었습니다."}
+
+@router.get("/users/usage")
+async def list_user_usages(
+    date: Optional[str] = None,
+    limit: int = 50,
+    x_admin_secret: Optional[str] = Header(None, alias="X-Admin-Secret")
+):
+    """당일 또는 특정 일자의 사용자 쿼터 사용 현황을 조회합니다."""
+    check_admin_secret(x_admin_secret)
+    usages = get_all_user_usages(target_date=date, limit=limit)
+    return {"status": "success", "items": usages}
+
+@router.post("/users/{user_id}/reset-quota")
+async def reset_user_quota_endpoint(
+    user_id: str,
+    date: Optional[str] = None,
+    x_admin_secret: Optional[str] = Header(None, alias="X-Admin-Secret")
+):
+    """특정 사용자의 당일 생성 쿼터 카운트를 0회로 초기화합니다."""
+    check_admin_secret(x_admin_secret)
+    reset_user_quota(user_id=user_id, target_date=date)
+    return {"status": "success", "message": f"사용자 {user_id}의 당일 사용량이 0회로 초기화되었습니다."}
+
+@router.get("/guides")
+async def list_admin_study_guides(
+    limit: int = 50,
+    offset: int = 0,
+    search: Optional[str] = None,
+    x_admin_secret: Optional[str] = Header(None, alias="X-Admin-Secret")
+):
+    """저장된 학습 가이드 목록을 조회합니다."""
+    check_admin_secret(x_admin_secret)
+    data = get_admin_study_guides(limit=limit, offset=offset, search=search)
+    return {"status": "success", **data}
+
+@router.delete("/guides/{guide_id}")
+async def delete_admin_study_guide(
+    guide_id: str,
+    x_admin_secret: Optional[str] = Header(None, alias="X-Admin-Secret")
+):
+    """학습 가이드 데이터를 데이터베이스에서 삭제합니다."""
+    check_admin_secret(x_admin_secret)
+    success = delete_study_guide(guide_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="가이드를 찾을 수 없습니다.")
+    return {"status": "success", "message": f"학습 가이드 {guide_id}가 삭제되었습니다."}
+
+
