@@ -51,10 +51,12 @@ export async function updateSession(request: NextRequest) {
   const isAuthCallback = pathname.startsWith('/auth/callback');
   const isApiRoute = pathname.startsWith('/api/');
   const isAdminRoute = pathname.startsWith('/admin');
+  const isStaticAsset = pathname === '/manifest.json' || pathname === '/favicon.ico' || pathname.startsWith('/icons/');
 
   // 백엔드 API 라우트(/api/)는 FastAPI가 게스트/인증을 처리하고,
-  // 관리자 페이지(/admin)는 자체 마스터 패스코드(studyguide-admin-2026)로 인증하므로 통과
-  if (isApiRoute || isAdminRoute) {
+  // 관리자 페이지(/admin)는 자체 마스터 패스코드(studyguide-admin-2026)로 인증하며,
+  // PWA manifest.json 및 정적 리소스는 인증 없이 통과
+  if (isApiRoute || isAdminRoute || isStaticAsset) {
     return supabaseResponse;
   }
 
