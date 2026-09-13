@@ -1,6 +1,6 @@
 # Interactive Video Study Guide System - 인수인계서 (Handover)
 
-> **최종 갱신 일시**: 2026-09-14 (02:05 KST)  
+> **최종 갱신 일시**: 2026-09-14 (03:38 KST)  
 > **작성자**: Antigravity (AI Pair Programming Assistant)  
 > **문서 목적**: 다음 세션 작업자 및 사용자를 위한 프로젝트 현황, 아키텍처, 최근 해결된 버그 히스토리 및 운영 배포 인수인계
 
@@ -64,7 +64,22 @@ Interactive Video Study Guide System은 유튜브 영상 또는 웹 문서를 �
 * **에스컬레이션 프롬프트 3배 누적 팽창 주장 해명**:
   * 원본 불변 객체인 `base_system_prompt`에 당회차 `escalation`만 결합하므로 재시도가 발생해도 프롬프트가 3배로 불어나지 않음을 규명.
 
-### 2.6 [Track A 완수] Neon PostgreSQL 전환, 쿼터 배지, YouTube 싱크, 내보내기, PWA, 운영 배포 (전체 5단계 완수)
+### 2.6 [P0 운영 배포] 관리자 대시보드(/admin) 활성화 및 EC2 백엔드 실시간 동기화
+* **문제 증상**:
+  1. 관리자 통합 대시보드(`https://interactive-video-study-guide-syste.vercel.app/admin`) 접속 시 404 발생.
+  2. UI 진입 후 콘솔에서 `/api/admin/overview`, `/api/admin/jobs`, `/api/admin/guides` 404 에러 발생 및 PWA `manifest.json` 파싱 실패(Line 1 Syntax error) 발생.
+* **원인 규명**:
+  1. `frontend/src/app/admin/page.tsx` 및 `layout.tsx`가 로컬에만 존재하고 Untracked 상태여서 Vercel 배포 누락.
+  2. EC2 인스턴스(`13.209.73.143`)에서 신규 추가된 `backend/routers/admin.py` 코드가 미반영되어 Docker 컨테이너가 이전 이미지로 기동 중이었음.
+  3. `backend/routers/admin.py` 상단에 `Header`, `HTTPException`, `Depends`, `timezone`, `os` import 누락으로 인한 런타임 NameError.
+  4. Supabase 미들웨어에서 `/manifest.json`이 미인증 사용자로 간주되어 `/login`으로 307 리다이렉트되어 HTML이 JSON 매니페스트로 전달됨.
+* **해결 조치**:
+  1. Git 추적 추가 및 커밋(`f62eb46`, `125f0c2`, `1f2b307`)을 통해 Vercel 및 EC2에 최신 코드 반영.
+  2. EC2 SSH 원격 접속 후 `git pull origin main` 및 `./scripts/deploy_backend.sh` 실행하여 `studyguide-backend:latest` 재빌드 및 컨테이너 재가동 완료.
+  3. `frontend/src/utils/supabase/middleware.ts`에 `manifest.json`, `favicon.ico`, `/icons/` 정적 자산 및 `/admin` 바이패스 추가.
+  4. 실측 검증: `/api/admin/overview` 호출 시 Neon PostgreSQL(`connected`), Redis(`connected`), Celery(`active 1 worker`), Job 총 105건 데이터 정상 반환 확인.
+
+### 2.7 [Track A 완수] Neon PostgreSQL 전환, 쿼터 배지, YouTube 싱크, 내보내기, PWA, 운영 배포 (전체 5단계 완수)
 * **배경 및 목적**:
   * 기존 SQLite 단일 파일(`jobs.db`)의 동시성 락 충돌과 미인증/무제한 생성으로 인한 서버 API 키 비용 폭사 위험을 영구 차단하고, 스토어 규격(Store-Ready)과 학습자 생산성(내보내기/싱크)을 완비하기 위함.
 * **작업 내용**:
