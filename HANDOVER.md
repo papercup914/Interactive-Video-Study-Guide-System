@@ -1,6 +1,6 @@
 # Interactive Video Study Guide System - 인수인계서 (Handover)
 
-> **최종 갱신 일시**: 2026-09-13 (23:55 KST)  
+> **최종 갱신 일시**: 2026-09-14 (01:25 KST)  
 > **작성자**: Antigravity (AI Pair Programming Assistant)  
 > **문서 목적**: 다음 세션 작업자 및 사용자를 위한 프로젝트 현황, 아키텍처, 최근 해결된 버그 히스토리 및 운영 배포 인수인계
 
@@ -10,12 +10,18 @@
 
 Interactive Video Study Guide System은 유튜브 영상 또는 웹 문서를 분석하여, 구조화된 인터랙티브 학습 가이드(챕터별 서술형 본문, 퀴즈, 파인만 기법, 논리 트레이서, 연상기억법 등)를 자동 생성하는 AI 학습 지원 서비스입니다.
 
-### 1.1 인프라 구성
+### 1.1 인프라 및 클라이언트 구성
 * **Frontend (웹 클라이언트)**:
   * **호스팅**: Vercel Production
   * **프레임워크**: Next.js 16 (App Router, Turbopack, Tailwind CSS)
   * **도메인**: `https://interactive-video-study-guide-syste.vercel.app/`
   * **저장소 브랜치**: `main` (푸시 시 Vercel 자동 빌드 및 배포)
+* **Mobile (안드로이드 네이티브 클라이언트)**:
+  * **프로젝트 위치**: `android/`
+  * **프레임워크**: Jetpack Compose, Kotlin 2.3.20, Android SDK 36 (`minSdk 24`)
+  * **CI/CD 파이프라인**: GitHub Actions (`.github/workflows/android-build.yml`)
+  * **생성 아티팩트**: `app-debug.apk` (약 11.9 MB)
+  * **로컬 보관 위치**: `apk_output/studyguide-debug-apk/app-debug.apk`
 * **Backend & Worker (AI 파이프라인)**:
   * **호스팅**: AWS EC2 (`ubuntu@13.209.73.143`)
   * **접속 키**: 프로젝트 루트 `aws/studyguide-key.pem`
@@ -82,6 +88,11 @@ Interactive Video Study Guide System은 유튜브 영상 또는 웹 문서를 �
   2. **GitHub Actions 클라우드 APK 빌드 자동화 (`.github/workflows/android-build.yml`)**:
      * 코드 푸시 시 `ubuntu-latest`, Temurin JDK 17, `setup-android` 환경에서 `./gradlew assembleDebug` 자동 실행.
      * 빌드 성공 시 `studyguide-debug-apk` 아티팩트(`app-debug.apk`) 자동 생성 및 즉시 다운로드 제공.
+  3. **컴파일 에러 해결 및 빌드 완수**:
+     * `CookieManager.setAcceptThirdPartyCookies` 매개변수 불일치 오류 픽스 (`b8df306`).
+     * GitHub Actions 클라우드 빌드 성공 (Build #34767765608).
+     * 로컬 테스트용 APK 파일 수령 완료: `apk_output/studyguide-debug-apk/app-debug.apk` (약 11.9 MB).
+     * `.gitignore`에 APK 및 빌드 캐시 디렉토리 등록 (`684aa31`).
 
 ---
 
@@ -106,11 +117,17 @@ Interactive Video Study Guide System은 유튜브 영상 또는 웹 문서를 �
 * **백엔드 컴파일 검증 완료**: `tasks.py`, `chapter.py`, `outline.py`, `validators.py`, `models.py`, `job_manager.py`, `auth.py`, `guide.py` (Exit code 0)
 * **PostgreSQL 및 쿼터 단위 테스트 완료**: `python tests/test_track_a_neon_and_quota.py` (5개 테스트 전체 통과, Exit code 0)
 * **프론트엔드 Turbopack 빌드 완료**: `cd frontend && npm run build` (Exit code 0)
+* **안드로이드 클라우드 APK 빌드 완료**: GitHub Actions Build #34767765608 성공 (`app-debug.apk`, 11.9MB 생성 및 로컬 다운로드 완료)
 * **AWS EC2 운영 서버 배포 완료**: FastAPI 및 Celery 컨테이너 리빌드/재기동 확인 (`13.209.73.143:8000/health` 200 OK)
 * **Vercel Production 배포 완료**: `main` 브랜치 자동 배포
 
 ### 4.2 Git 배포 내역
-* 최신 커밋: `feat(track-a): complete store-ready infrastructure with Neon DB, quota badge, YouTube sync, Markdown export and PWA` (Hash: `8273188`)
+* 최신 커밋: `chore: update .gitignore for apk_output and android build cache` (Hash: `684aa31`)
+* 안드로이드 관련 커밋:
+  * `b8df306`: `fix(android): resolve CookieManager webView parameter mismatch`
+  * `c879637`: `feat(android): add native Android WebView wrapper and APK build workflow`
+* 인프라 고도화 커밋: `8273188` (`feat(track-a): complete store-ready infrastructure...`)
+
 
 ---
 
