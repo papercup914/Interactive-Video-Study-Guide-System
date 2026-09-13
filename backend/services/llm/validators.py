@@ -90,7 +90,11 @@ def validate_chapter_narrative(content: str, min_chars: int = 1000, min_narrativ
 
     # 5. 한국어 서술 검증 (외국어 미번역 방지)
     korean_chars = len(re.findall(r'[가-힣]', trimmed))
-    if korean_chars < 150:
-        return False, f"한국어로 번역되지 않았거나 한글 서술이 절대적으로 부족합니다 (한글 글자 수: {korean_chars}자 < 150자)."
+    english_chars = len(re.findall(r'[a-zA-Z]', trimmed))
+    if korean_chars < 250:
+        return False, f"한국어로 번역되지 않았거나 한글 서술이 절대적으로 부족합니다 (한글 글자 수: {korean_chars}자 < 250자)."
+    if english_chars >= 100 and (korean_chars / (korean_chars + english_chars)) < 0.4:
+        ratio_pct = int((korean_chars / (korean_chars + english_chars)) * 100)
+        return False, f"출력 본문에 외국어(영어 등) 비율이 너무 높습니다 (한글 비율: {ratio_pct}% < 40%). 본문 전체를 100% 한국어로 번역해야 합니다."
             
     return True, "유효한 서술형 본문 및 2단계 구조입니다."

@@ -103,6 +103,7 @@ def generate_outline(
     if is_valid_chapters:
         prompt = f"""
         당신은 100만 지식 큐레이션 채널(예: BZCF 등)의 수석 콘텐츠 기획자입니다.
+        [영상 원본 제목/주제]: "{default_title}"
         유튜브 영상의 원작자가 등록한 공식 챕터 정보가 주어집니다.
         이 공식 챕터들을 독자가 흥미를 느끼고 핵심 교훈(Benefit)을 직관적으로 파악할 수 있도록
         감칠맛 나는 한국어 질문형/통찰형 챕터 제목으로 번역 및 각색해주세요.
@@ -122,6 +123,7 @@ def generate_outline(
     else:
         prompt = f"""
         당신은 100만 지식 큐레이션 채널(예: BZCF 등)의 수석 콘텐츠 기획자입니다.
+        [영상 원본 제목/주제]: "{default_title}"
         주어진 내용(오디오 또는 스크립트)을 분석하여 학습용 목차(Outline)를 작성해줘.
         {outline_instruction}
         - [🚨 최우선 절대 준수: 시간 순서(Time Sequence) 엄격 유지]

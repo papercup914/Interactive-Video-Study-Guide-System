@@ -325,7 +325,8 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
                     length_preset, analogy_preset, learner_profile, url_hash,
                     tutor_persona, force_refresh,
                     custom_api_key=custom_api_key,
-                    custom_base_url=custom_base_url
+                    custom_base_url=custom_base_url,
+                    raw_title=raw_title
                 )
                 if content and content.strip():
                     document[section_title] = content

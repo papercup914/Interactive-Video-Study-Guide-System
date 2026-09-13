@@ -8,15 +8,17 @@ def build_chapter_system_prompt(
     tutor_directive: str,
     learner_profile: str,
     analogy_instruction: str,
-    length_instruction: str
+    length_instruction: str,
+    raw_title: str = ""
 ) -> str:
     """
     주어진 페르소나 및 분량/비유 설정에 따라 최적화된 챕터 시스템 프롬프트를 생성합니다.
     """
     profile_text = learner_profile if learner_profile else "일반적인 성인 학습자"
+    video_topic_directive = f"\n[영상 전체 주제/제목]: \"{raw_title}\"\n모든 챕터 서술은 이 영상의 대주제 및 맥락과 긴밀히 연계되어야 합니다.\n" if raw_title else ""
     
     return f"""{tutor_directive}
-
+{video_topic_directive}
 제공된 [전체 스크립트]를 분석하여 챕터 제목 '{section_title}'에 해당하는 내용으로 상세한 챕터 학습 가이드 본문을 작성하십시오.
 
 <PERSONA_DIRECTIVE>

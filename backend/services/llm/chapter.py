@@ -40,7 +40,8 @@ async def async_generate_chapter_content(
     tutor_persona: dict = None, 
     force_refresh: bool = False,
     custom_api_key: Optional[str] = None,
-    custom_base_url: Optional[str] = None
+    custom_base_url: Optional[str] = None,
+    raw_title: Optional[str] = ""
 ) -> str:
     """
     전체 스크립트를 LLM에 전달하여 챕터 내용에 해당하는 부분을 스스로 찾아서 작성하도록 합니다. (정확도 우선)
@@ -147,7 +148,8 @@ async def async_generate_chapter_content(
             tutor_directive=tutor_directive,
             learner_profile=learner_profile,
             analogy_instruction=analogy_instruction,
-            length_instruction=length_instruction
+            length_instruction=length_instruction,
+            raw_title=raw_title or ""
         )
 
         user_instruction = (
@@ -460,20 +462,23 @@ async def async_generate_chapter_content(
             else:
                 tag_block = ""
 
+            clean_t = re.sub(r'\(.*?\)', '', section_title).strip() or section_title
+            clean_t = re.sub(r'^[0-9]+[\.\s\-]+', '', clean_t).strip() or clean_t
+
             result = (
                 f"## {section_title}\n\n"
-                f"**{section_title}**의 핵심 개념과 주요 동작 메커니즘을 상세히 짚어보겠습니다.\n\n"
-                f"### 1. 도입 및 핵심 원리 소개\n"
-                f"{section_title}은 시스템과 알고리즘의 동작에서 매우 중요한 위치를 차지합니다. "
+                f"**{clean_t}**의 핵심 개념과 주요 맥락을 체계적으로 짚어보겠습니다.\n\n"
+                f"### 1. 도입 및 핵심 배경\n"
+                f"{clean_t}은 전체 주제의 맥락과 기본 원리를 이해하는 데 중요한 비중을 차지합니다. "
                 f"기초 개념을 충실히 다지고 단계별 흐름을 파악함으로써 전체적인 이해도를 크게 높일 수 있습니다.\n\n"
-                f"### 2. 세부 메커니즘 및 직관적 비유\n"
-                f"이 개념을 일상적인 예시에 비유하자면, 복잡한 작업을 잘 조율된 프로세스를 통해 순차적으로 해결해 나가는 것과 같습니다. "
-                f"각 구성 요소가 상호작용하는 원리를 정확히 파악하면 문제 상황에서도 최적의 접근 방식을 찾아낼 수 있습니다.\n\n"
+                f"### 2. 세부 내용 및 직관적 해설\n"
+                f"이 주제의 본질을 파악하기 위해서는 현실적인 사례와 다양한 관점을 함께 살펴보는 것이 좋습니다. "
+                f"각 핵심 요소가 상호작용하는 원리를 정확히 파악하면 복잡한 상황에서도 본질에 집중하는 올바른 접근 방식을 찾아낼 수 있습니다.\n\n"
                 f"> **💡 핵심 인사이트**\n"
-                f"> {section_title}의 본질은 원리와 맥락의 유기적 결합입니다. 개별 세부 사항에 얽매이기보다 전체 아키텍처 관점에서 파악하는 것이 중요합니다.\n\n"
-                f"### 3. 실무 활용 팁 & 주의사항\n"
-                f"- 실제 프로젝트에 적용하기 전에 기본 요구사항과 경계 조건을 명확히 검토하십시오.\n"
-                f"- 성능 최적화와 예외 처리 패턴을 설계 초기부터 고려하여 안정성을 확보하십시오.\n\n"
+                f"> {clean_t}의 본질은 원리와 맥락의 유기적 결합입니다. 개별 세부 사항에 얽매이기보다 전체적인 흐름과 목적 관점에서 파악하는 것이 중요합니다.\n\n"
+                f"### 3. 실무 팁 & 주의사항\n"
+                f"- 상황에 적용하기 전에 기본 전제와 핵심 요구사항을 명확히 검토하십시오.\n"
+                f"- 원칙을 기계적으로 적용하기보다 현장의 실제 맥락과 조건에 맞추어 유연하게 응용하십시오.\n\n"
                 f"{tag_block}"
             )
 
