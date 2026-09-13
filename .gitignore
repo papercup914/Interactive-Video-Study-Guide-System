@@ -45,3 +45,10 @@ Thumbs.db
 
 # Obsidian
 .obsidian/
+
+# Android Build Outputs & APKs
+apk_output/
+*.apk
+android/.gradle/
+android/app/build/
+android/build/
