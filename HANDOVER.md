@@ -186,6 +186,24 @@ Interactive Video Study Guide System은 유튜브 영상 또는 웹 문서를 �
   * 프론트엔드 프로덕션 빌드 (`npm run build`) 무결점 성공 (Exit code 0).
   * AWS EC2(`13.209.73.143`) 백엔드 Docker 컨테이너 무중단 재빌드 및 배포 완료 (`FastAPI 200 OK`, `Celery Ready`).
 
+### 2.11 [P0 버그 픽스] 대용량 오디오 업로드 413 Payload Too Large 해결 (청크 분할 업로드 시스템 구축)
+* **문제 증상**:
+  * 메인 화면에서 대용량 음성 녹음 파일(MP3 등)을 첨부하고 생성을 요청했을 때 `생성 요청 실패: 서버 응답 오류 (상태 코드: 413)` 팝업 발생.
+* **원인 규명**:
+  * Next.js 프론트엔드가 호스팅된 Vercel Production의 Serverless/Rewrites 프록시에는 **단일 HTTP 요청 바디 4.5 MB 제한(Hard Limit)**이 존재함.
+  * 브라우저가 수십 MB 오디오 파일을 `/api/guide/start`로 직접 전송하면서 백엔드(FastAPI) 도달 전 Vercel 엣지 인프라에서 `413 FUNCTION_PAYLOAD_TOO_LARGE`로 요청을 즉시 차단함.
+* **해결 조치**:
+  1. **백엔드 청크 수신 및 결합 엔드포인트 신설 (`backend/routers/guide.py`)**:
+     * `POST /api/guide/upload-chunk`: 3MB 단위로 분할된 조각 바이너리를 `backend/tmp/chunks/{upload_id}/`에 저장하고, 마지막 청크 수신 시 단일 파일로 결합하여 `file_path` 반환.
+     * `POST /api/guide/start`: `uploaded_file_paths` 수신 지원. 이미 결합된 파일 경로를 Celery 작업 큐로 즉시 전달하여 메인 요청 바디를 수백 바이트(JSON)로 경량화.
+  2. **프론트엔드 브라우저 청크 분할 전송 모듈 (`frontend/src/app/page.tsx`)**:
+     * `uploadFileInChunks`: `Blob.slice()`를 이용하여 3MB 조각 단위로 순차 전송.
+     * 실시간 업로드 진행률(0% ~ 100%) 및 청크 조각 번호 표시 프로그레스 바 UI 렌더링.
+* **검증 결과**:
+  * 청크 업로드 및 무결점 결합 단위 테스트 `tests/test_chunked_upload.py` 통과 (`Ran 1 test in 0.173s, OK`).
+  * 프론트엔드 빌드(`npm run build`) 무결점 성공 (Exit code 0).
+  * AWS EC2(`13.209.73.143`) 백엔드 Docker 재빌드 및 무중단 배포 완료 (`FastAPI 200 OK`).
+
 ---
 
 ## 3. Notion 버그 리포트 관리 현황
