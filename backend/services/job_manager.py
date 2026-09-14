@@ -3,7 +3,7 @@ import os
 from typing import Dict, Any
 from datetime import datetime, timezone
 from backend.data.database import SessionLocal, engine
-from backend.data.models import Base, Job, JobCheckpoint, StudyGuide, BatchJob, BatchVideoItem, UserUsage
+from backend.data.models import Base, Job, JobCheckpoint, StudyGuide, BatchJob, BatchVideoItem, UserUsage, SystemConfig
 from typing import List, Optional
 
 from sqlalchemy import text, or_, inspect

@@ -128,6 +128,36 @@ Interactive Video Study Guide System은 유튜브 영상 또는 웹 문서를 �
   * 백엔드 단위 테스트 `tests/test_admin_c_plan.py` (3개 테스트 전체 통과, Exit code 0).
   * 프론트엔드 Next.js 프로덕션 빌드 (`npm run build`) 무결점 성공 (Exit code 0).
 
+### 2.9 [관리자 포털] 학습 가이드 생성 매커니즘 제어 포털(/admin/generation-config) 구축 완비
+* **배경 및 목적**:
+  * 기존에는 AI 모델, 목차 생성 알고리즘, 서술형 본문 지침, 4대 위젯, 한글 검증 임계치 등의 파라미터가 소스 코드에 고정되어 있어, 수정 시마다 재배포가 필요했던 한계를 영구 해결하고, 관리자가 웹 UI에서 모든 매커니즘을 실시간 제어할 수 있도록 구축.
+* **구현 내용**:
+  1. **Neon PostgreSQL DB 영속화 (`models.py`, `pipeline_config.py`)**:
+     * `SystemConfig` 모델 신설 및 자동 테이블 마이그레이션 (`_ensure_table`).
+     * AI 모델(Gemini/GPT/Groq), 목차 규칙, 본문 서술 지침, 4대 위젯, 품질 검증 가드레일, 자막 수집 파이프라인의 통합 스키마 관리.
+     * 3대 추천 프리셋 시스템 (🎯 표준 균형 모드, ⚡ 초고속 경량 모드, 🔬 학술/심화 연구 모드).
+     * 인메모리 캐시(TTL 30초) + DB Fallback 안전망으로 무중단 서비스 보장.
+  2. **관리자 REST API 신설 (`backend/routers/admin.py`)**:
+     * `GET /api/admin/pipeline/config`: 설정 및 프리셋 조회
+     * `PUT /api/admin/pipeline/config`: 실시간 설정 저장 및 DB 반영
+     * `POST /api/admin/pipeline/reset`: 표준 기본값으로 1-Click 리셋
+     * `POST /api/admin/pipeline/apply-preset`: 추천 프리셋 즉시 적용
+     * `POST /api/admin/pipeline/test-simulate`: 관리자용 실시간 샌드박스 시뮬레이터 API
+  3. **프론트엔드 전용 제어 센터 (`/admin/generation-config/page.tsx`)**:
+     * 상단 헤더 네비게이션에 [생성 매커니즘 제어] 탭 연동 (`layout.tsx`).
+     * 관리자 대시보드 허브에 퀵 배너 연동 (`admin/page.tsx`).
+     * 6대 탭 인터페이스:
+       * 🤖 **AI 모델 & 엔진**: Primary LLM, Concurrency(1~8), Temperature, Max Tokens, Timeout, Retries
+       * 📑 **목차 설계 규칙**: 공식 챕터 파싱 토글, 각색 스타일(호기심/인사이트/직역), 시간 순서 엄격 강제, 스마트 슬라이싱 윈도우
+       * ✍️ **본문 서술 & 프롬프트**: 제로-인사말 강제 토글, 100% 한국어 서술 토글, 금지어 에디터, 튜터 페르소나
+       * 🧩 **인터랙티브 위젯**: 4대 위젯(파인만, 논리트레이서, 연상기억, 절차) 스위치, 부착 방식(AI 자동 1개 / 전체 / 끔)
+       * 🛡️ **품질 검증 가드레일**: 최소 글자 수, 한글/영문 비율 임계치, 에스컬레이션 재시도 토글 및 프롬프트 편집기
+       * 🧪 **실시간 테스트 랩 (Playground)**: 목차 추출 및 단일 챕터 생성을 즉석 테스트하고 소요 시간 및 가드레일 통과 여부 확인
+* **검증 결과**:
+  * 백엔드 단위 테스트 `tests/test_pipeline_config.py` (6개 테스트 100% 통과, Exit code 0).
+  * 기존 관리자 테스트 `tests/test_admin_c_plan.py` 회귀 테스트 통과 (Exit code 0).
+  * Next.js 프로덕션 빌드 (`npm run build`) 무결점 성공 (Exit code 0).
+
 ---
 
 ## 3. Notion 버그 리포트 관리 현황

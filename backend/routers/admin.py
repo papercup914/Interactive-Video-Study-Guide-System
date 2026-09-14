@@ -640,3 +640,191 @@ async def delete_admin_study_guide(
     return {"status": "success", "message": f"학습 가이드 {guide_id}가 삭제되었습니다."}
 
 
+# ==================== GENERATION PIPELINE MECHANISM CONTROL APIs ====================
+
+from backend.services.pipeline_config import (
+    get_pipeline_config,
+    update_pipeline_config,
+    reset_pipeline_config_to_defaults,
+    apply_pipeline_preset,
+    get_all_presets_meta
+)
+
+class PipelineConfigUpdateRequest(BaseModel):
+    config: Dict[str, Any]
+
+class ApplyPresetRequest(BaseModel):
+    preset_key: str
+
+class PipelineSimulationRequest(BaseModel):
+    test_type: str = "outline"  # "outline" or "chapter"
+    sample_text: Optional[str] = None
+    section_title: Optional[str] = "테스트 챕터: 핵심 메커니즘 분석"
+    raw_title: Optional[str] = "인터랙티브 AI 학습 가이드 시뮬레이션"
+    config_override: Optional[Dict[str, Any]] = None
+
+@router.get("/pipeline/config")
+async def get_pipeline_config_endpoint(
+    x_admin_secret: Optional[str] = Header(None, alias="X-Admin-Secret")
+):
+    """현재 학습 가이드 생성 파이프라인의 모든 매커니즘 설정과 프리셋 목록을 조회합니다."""
+    check_admin_secret(x_admin_secret)
+    config = get_pipeline_config()
+    presets = get_all_presets_meta()
+    return {
+        "status": "success",
+        "config": config,
+        "presets": presets
+    }
+
+@router.put("/pipeline/config")
+async def update_pipeline_config_endpoint(
+    req: PipelineConfigUpdateRequest,
+    x_admin_secret: Optional[str] = Header(None, alias="X-Admin-Secret")
+):
+    """관리자가 수정한 파이프라인 매커니즘 설정을 DB에 영속화하고 즉시 적용합니다."""
+    check_admin_secret(x_admin_secret)
+    try:
+        updated = update_pipeline_config(req.config)
+        return {
+            "status": "success",
+            "message": "생성 매커니즘 설정이 성공적으로 저장 및 적용되었습니다.",
+            "config": updated
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"설정 저장 실패: {str(e)}")
+
+@router.post("/pipeline/reset")
+async def reset_pipeline_config_endpoint(
+    x_admin_secret: Optional[str] = Header(None, alias="X-Admin-Secret")
+):
+    """모든 생성 파이프라인 설정을 시스템 초기 표준값(Factory Default)으로 리셋합니다."""
+    check_admin_secret(x_admin_secret)
+    try:
+        reset_config = reset_pipeline_config_to_defaults()
+        return {
+            "status": "success",
+            "message": "생성 파이프라인 설정이 표준 기본값으로 초기화되었습니다.",
+            "config": reset_config
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"초기화 실패: {str(e)}")
+
+@router.post("/pipeline/apply-preset")
+async def apply_preset_endpoint(
+    req: ApplyPresetRequest,
+    x_admin_secret: Optional[str] = Header(None, alias="X-Admin-Secret")
+):
+    """선택한 추천 프리셋(초고속 경량, 표준 균형, 학술 심화 등)을 즉시 적용합니다."""
+    check_admin_secret(x_admin_secret)
+    try:
+        applied = apply_pipeline_preset(req.preset_key)
+        return {
+            "status": "success",
+            "message": f"'{req.preset_key}' 프리셋이 성공적으로 적용되었습니다.",
+            "config": applied
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"프리셋 적용 실패: {str(e)}")
+
+@router.post("/pipeline/test-simulate")
+async def simulate_pipeline_generation(
+    req: PipelineSimulationRequest,
+    x_admin_secret: Optional[str] = Header(None, alias="X-Admin-Secret")
+):
+    """
+    관리자 샌드박스: 현재 또는 임시 설정으로 목차 추출 또는 챕터 1개 생성을 즉석에서 시뮬레이션하고,
+    품질 검증 통과 여부 및 소요 시간, 결과물을 반환합니다.
+    """
+    check_admin_secret(x_admin_secret)
+    import time
+    from backend.services.llm import generate_outline, async_generate_chapter_content, validate_chapter_narrative
+    
+    start_time = time.time()
+    sample_text = req.sample_text or (
+        "인공지능과 대규모 언어 모델(LLM)은 현대 소프트웨어 개발의 패러다임을 급격히 변화시키고 있습니다. "
+        "전통적인 규칙 기반 프로그래밍과 달리, 데이터와 프롬프트를 통해 스스로 문맥을 이해하고 "
+        "문제를 해결하는 능력을 갖추고 있습니다. 특히 에이전트 아키텍처는 자율적인 계획 수립과 "
+        "도구 실행, 그리고 피드백 루프를 결합하여 복잡한 다단계 작업을 사람의 개입 없이 완수할 수 있는 "
+        "강력한 가능성을 보여줍니다. 이번 세션에서는 이러한 AI 파이프라인의 핵심 구조와 실제 구현 메커니즘을 상세히 살펴봅니다."
+    )
+    
+    # 임시 오버라이드가 있으면 병합
+    cfg = get_pipeline_config()
+    if req.config_override:
+        from backend.services.pipeline_config import _deep_merge
+        cfg = _deep_merge(cfg, req.config_override)
+
+    llm_cfg = cfg.get("llm", {})
+    provider = llm_cfg.get("primary_model", "gemini-2.5-flash")
+    if not provider.startswith("Google Gemini") and "gemini" in provider.lower():
+        provider_name = "Google Gemini"
+    else:
+        provider_name = provider
+
+    try:
+        if req.test_type == "outline":
+            sections = generate_outline(
+                context_data=sample_text,
+                provider=provider_name,
+                url_hash=f"sim_{int(start_time)}",
+                length_preset="적당한 설명",
+                force_refresh=True,
+                default_title=req.raw_title or "시뮬레이션 목차 테스트"
+            )
+            elapsed = round(time.time() - start_time, 2)
+            return {
+                "status": "success",
+                "test_type": "outline",
+                "sections": sections,
+                "sections_count": len(sections),
+                "elapsed_seconds": elapsed,
+                "used_provider": provider_name
+            }
+        else:
+            # Chapter 1개 생성 시뮬레이션
+            chapter_title = req.section_title or "핵심 원리와 메커니즘 분석"
+            content = await async_generate_chapter_content(
+                section_title=chapter_title,
+                context_data=sample_text,
+                provider=provider_name,
+                chunk_index=0,
+                total_chunks=1,
+                length_preset="적당한 설명",
+                analogy_preset="풍부한 비유",
+                learner_profile="성인 개발자 및 기획자",
+                url_hash=f"sim_ch_{int(start_time)}",
+                force_refresh=True,
+                raw_title=req.raw_title or "시뮬레이션 챕터 테스트"
+            )
+            
+            # 품질 검증 확인
+            guard = cfg.get("guardrails", {})
+            is_valid, reason = validate_chapter_narrative(
+                content,
+                min_chars=guard.get("min_total_chars_summary", 800),
+                min_narrative_chars=guard.get("min_narrative_chars_summary", 500)
+            )
+            
+            elapsed = round(time.time() - start_time, 2)
+            return {
+                "status": "success",
+                "test_type": "chapter",
+                "section_title": chapter_title,
+                "content": content,
+                "total_chars": len(content),
+                "is_valid": is_valid,
+                "validation_reason": reason,
+                "elapsed_seconds": elapsed,
+                "used_provider": provider_name
+            }
+    except Exception as e:
+        elapsed = round(time.time() - start_time, 2)
+        return {
+            "status": "error",
+            "message": f"시뮬레이션 실행 중 오류 발생: {str(e)}",
+            "elapsed_seconds": elapsed
+        }
+
+
+

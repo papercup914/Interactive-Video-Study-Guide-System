@@ -95,3 +95,13 @@ class BatchVideoItem(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), onupdate=lambda: datetime.now(timezone.utc))
 
+
+class SystemConfig(Base):
+    __tablename__ = "system_configs"
+    
+    key = Column(String, primary_key=True, index=True) # e.g. "generation_pipeline"
+    value = Column(Text, nullable=False) # JSON encoded configuration string
+    description = Column(String, nullable=True)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), onupdate=lambda: datetime.now(timezone.utc))
+
+

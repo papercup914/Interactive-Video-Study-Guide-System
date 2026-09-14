@@ -27,7 +27,8 @@ import {
   Server,
   Layers,
   Sparkles,
-  AlertTriangle
+  AlertTriangle,
+  Sliders
 } from "lucide-react";
 import { useAdminAuth } from "./layout";
 
@@ -481,6 +482,37 @@ export default function AdminHubPage() {
             </div>
           </div>
           <span className="text-[11px] text-slate-500 font-mono">Async Engine</span>
+        </div>
+      </div>
+
+      {/* Generation Mechanism Control Quick Banner */}
+      <div className="relative overflow-hidden p-5 rounded-2xl bg-gradient-to-r from-indigo-950/60 via-slate-900 to-purple-950/40 border border-indigo-500/30 shadow-xl shadow-indigo-950/20">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-start sm:items-center space-x-3.5">
+            <div className="p-3 rounded-xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex-shrink-0">
+              <Sliders className="w-6 h-6 text-indigo-400" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-extrabold text-white tracking-tight">
+                  학습 가이드 생성 매커니즘 제어 센터
+                </h3>
+                <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[10px] font-bold uppercase">
+                  Engine Config
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 mt-1 max-w-2xl">
+                AI 모델(Gemini/GPT/Claude), 목차 생성 알고리즘, 서술형 본문 프롬프트, 4대 인터랙티브 위젯 규칙, 품질 검증 가드레일 및 실시간 시뮬레이터를 즉시 제어합니다.
+              </p>
+            </div>
+          </div>
+          <Link
+            href="/admin/generation-config"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white text-xs font-bold shadow-lg shadow-indigo-600/30 transition-all group flex-shrink-0"
+          >
+            <span>매커니즘 제어 포털 열기</span>
+            <ChevronRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+          </Link>
         </div>
       </div>
 

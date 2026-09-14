@@ -15,7 +15,8 @@ import {
   ArrowLeft, 
   Lock,
   Unlock,
-  AlertCircle
+  AlertCircle,
+  Sliders
 } from "lucide-react";
 
 interface AdminAuthContextType {
@@ -138,6 +139,7 @@ export default function AdminLayout({
     { href: "/admin", label: "관리자 허브", icon: LayoutDashboard, exact: true },
     { href: "/admin/batch", label: "일괄 사전 생성", icon: Zap },
     { href: "/admin/health", label: "시스템 상태 & 로그", icon: Activity },
+    { href: "/admin/generation-config", label: "생성 매커니즘 제어", icon: Sliders },
   ];
 
   return (
