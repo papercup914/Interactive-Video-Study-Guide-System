@@ -33,10 +33,75 @@ class GuideRequest(BaseModel):
     pdf_parsing_method: str = "basic"
     force_refresh: bool = False
 
+@router.post("/upload-chunk")
+async def upload_file_chunk(
+    upload_id: str = Form(...),
+    chunk_index: int = Form(...),
+    total_chunks: int = Form(...),
+    filename: str = Form(...),
+    chunk: UploadFile = File(...)
+):
+    """
+    대용량 파일(오디오, PDF 등)을 3MB 단위로 분할 업로드하여 Vercel 4.5MB 페이로드 제한을 우회합니다.
+    모든 청크가 도착하면 자동으로 단일 파일로 결합하여 완성된 경로를 반환합니다.
+    """
+    try:
+        # 안전한 식별자 및 파일명 정제
+        safe_upload_id = "".join([c for c in upload_id if c.isalnum() or c in ("-", "_")])
+        safe_filename = os.path.basename(filename)
+        if not safe_upload_id:
+            safe_upload_id = uuid.uuid4().hex
+
+        chunk_dir = f"backend/tmp/chunks/{safe_upload_id}"
+        os.makedirs(chunk_dir, exist_ok=True)
+
+        chunk_path = os.path.join(chunk_dir, f"{chunk_index}.chunk")
+        with open(chunk_path, "wb") as buffer:
+            shutil.copyfileobj(chunk.file, buffer)
+
+        # 현재 업로드 완료된 청크 개수 확인
+        existing_chunks = [
+            int(f.split(".")[0])
+            for f in os.listdir(chunk_dir)
+            if f.endswith(".chunk") and f.split(".")[0].isdigit()
+        ]
+
+        if len(existing_chunks) == total_chunks:
+            # 모든 청크 도착 완료 -> 최종 파일로 조립
+            os.makedirs("backend/tmp", exist_ok=True)
+            final_path = f"backend/tmp/{safe_upload_id}_{safe_filename}"
+            with open(final_path, "wb") as final_file:
+                for idx in sorted(existing_chunks):
+                    part_path = os.path.join(chunk_dir, f"{idx}.chunk")
+                    with open(part_path, "rb") as part_file:
+                        shutil.copyfileobj(part_file, final_file)
+
+            # 임시 청크 디렉토리 안전하게 정리
+            shutil.rmtree(chunk_dir, ignore_errors=True)
+
+            return {
+                "status": "completed",
+                "upload_id": safe_upload_id,
+                "file_path": final_path,
+                "filename": safe_filename,
+                "total_chunks": total_chunks
+            }
+
+        return {
+            "status": "chunk_saved",
+            "upload_id": safe_upload_id,
+            "chunk_index": chunk_index,
+            "received_chunks": len(existing_chunks),
+            "total_chunks": total_chunks
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"청크 업로드 처리 중 오류 발생: {str(e)}")
+
 @router.post("/start")
 async def start_guide_generation(
     url: str = Form(""),
     files: List[UploadFile] = File(None),
+    uploaded_file_paths: str = Form(""),
     provider: str = Form(""),
     length_preset: str = Form("아주 상세하게"),
     analogy_preset: str = Form("풍부한 비유"),
@@ -65,6 +130,21 @@ async def start_guide_generation(
     create_job(job_id, user_id=user_id)
     
     file_paths = []
+
+    # 1. 청크 업로드 등으로 이미 서버에 저장된 파일 경로 처리 (Vercel 4.5MB 제한 우회)
+    if uploaded_file_paths and uploaded_file_paths.strip():
+        try:
+            raw = uploaded_file_paths.strip()
+            parsed_paths = json.loads(raw) if raw.startswith("[") else [p.strip() for p in raw.split(",") if p.strip()]
+            for p in parsed_paths:
+                # 보안 검증: backend/tmp 내의 유효 파일만 허용
+                norm_p = os.path.normpath(p).replace("\\", "/")
+                if os.path.exists(p) and ("backend/tmp" in norm_p or "tmp/" in norm_p):
+                    file_paths.append(p)
+        except Exception as e:
+            print(f"[Warning] Failed to parse uploaded_file_paths: {e}")
+
+    # 2. 일반 직접 업로드 파일 처리 (하위 호환)
     if files:
         os.makedirs("backend/tmp", exist_ok=True)
         for f in files:
