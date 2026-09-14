@@ -156,11 +156,19 @@ Interactive Video Study Guide System은 유튜브 영상 또는 웹 문서를 �
 * **Vercel Production 배포 완료**: `main` 브랜치 자동 배포
 
 ### 4.2 Git 배포 내역
-* 최신 커밋: `chore: update .gitignore for apk_output and android build cache` (Hash: `684aa31`)
-* 안드로이드 관련 커밋:
+* **최신 커밋**: `0b0efa6` (`docs(handover): update HANDOVER.md with admin dashboard and EC2 backend hotfix`)
+* **관리자 및 핫픽스 관련 커밋**:
+  * `1f2b307`: `fix(admin): add missing imports in admin router`
+  * `125f0c2`: `fix(middleware): bypass manifest.json and static metadata to prevent PWA syntax error`
+  * `f62eb46`: `fix(admin): track admin layout and main dashboard page on vercel`
+  * `7f43d07`: `fix(vercel): remove cleanUrls from vercel.json to resolve /admin 404 routing conflict`
+  * `5865331`: `fix(auth): allow /admin routes to bypass Supabase consumer login in middleware`
+* **안드로이드 관련 커밋**:
+  * `9f3575c`: `docs(handover): update handover document with Android client and APK CI pipeline`
+  * `684aa31`: `chore: update .gitignore for apk_output and android build cache`
   * `b8df306`: `fix(android): resolve CookieManager webView parameter mismatch`
   * `c879637`: `feat(android): add native Android WebView wrapper and APK build workflow`
-* 인프라 고도화 커밋: `8273188` (`feat(track-a): complete store-ready infrastructure...`)
+* **인프라 고도화 커밋**: `8273188` (`feat(track-a): complete store-ready infrastructure with Neon DB, quota badge, YouTube sync, Markdown export and PWA`)
 
 
 ---
