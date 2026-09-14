@@ -49,6 +49,10 @@ from backend.services.llm.profiling import (
     profile_content
 )
 
+from backend.services.llm.meeting_minutes import (
+    generate_meeting_minutes_content
+)
+
 __all__ = [
     "safe_gemini_generate_content",
     "get_gemini_client",
@@ -74,5 +78,6 @@ __all__ = [
     "generate_answer",
     "translate_title",
     "extract_image_keyword",
-    "profile_content"
+    "profile_content",
+    "generate_meeting_minutes_content"
 ]

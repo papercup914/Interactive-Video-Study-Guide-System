@@ -656,14 +656,23 @@ export default function Home() {
               
               {files.length > 0 ? (
                 <div className="flex-1 bg-transparent px-2 font-body-lg text-body-lg text-primary flex items-center gap-2 overflow-x-auto scrollbar-hide">
-                  {files.map((f, idx) => (
-                    <div key={idx} className="flex items-center bg-primary-container/10 px-2 py-1 rounded-md shrink-0 border border-primary-container/20">
-                      <span className="truncate max-w-[150px] text-sm">{f.name}</span>
-                      <button type="button" onClick={() => setFiles(files.filter((_, i) => i !== idx))} className="ml-1 text-muted-foreground hover:text-error transition-colors">
-                        <X size={14} />
-                      </button>
-                    </div>
-                  ))}
+                  {files.map((f, idx) => {
+                    const isAudio = /\.(mp3|wav|m4a|aac|flac|ogg|wma)$/i.test(f.name);
+                    return (
+                      <div key={idx} className={`flex items-center px-2 py-1 rounded-md shrink-0 border ${
+                        isAudio 
+                          ? "bg-amber-500/10 text-amber-500 border-amber-500/30 font-medium" 
+                          : "bg-primary-container/10 text-primary border-primary-container/20"
+                      }`}>
+                        <span className="truncate max-w-[150px] text-sm">
+                          {isAudio ? `🎙️ ${f.name}` : f.name}
+                        </span>
+                        <button type="button" onClick={() => setFiles(files.filter((_, i) => i !== idx))} className="ml-1 text-muted-foreground hover:text-error transition-colors">
+                          <X size={14} />
+                        </button>
+                      </div>
+                    );
+                  })}
                   <button type="button" onClick={() => setFiles([])} className="text-muted-foreground hover:text-error transition-colors ml-auto shrink-0" title="모두 지우기">
                     <X size={18} />
                   </button>
@@ -673,18 +682,18 @@ export default function Home() {
                   type="text"
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
-                  placeholder="유튜브 링크를 붙여넣거나 문서를 업로드하세요..." 
+                  placeholder="유튜브 링크를 붙여넣거나 문서/음성(MP3, WAV) 파일을 업로드하세요..." 
                   className="flex-1 bg-transparent border-none focus:ring-0 font-body-lg text-body-lg text-text-primary placeholder-muted-foreground outline-none w-full"
                   required={files.length === 0}
                 />
               )}
 
               <div className="flex gap-2 shrink-0">
-                <label className="p-2 text-muted-foreground hover:text-text-primary hover:bg-surface-container-lowest rounded-lg transition-colors border border-transparent hover:border-border-subtle flex items-center justify-center cursor-pointer">
+                <label className="p-2 text-muted-foreground hover:text-text-primary hover:bg-surface-container-lowest rounded-lg transition-colors border border-transparent hover:border-border-subtle flex items-center justify-center cursor-pointer" title="파일 업로드 (PDF, TXT, MD, MP3, WAV, M4A)">
                   <Paperclip size={20} />
                   <input 
                     type="file" 
-                    accept=".pdf,.txt,.md" 
+                    accept=".pdf,.txt,.md,.mp3,.wav,.m4a,.aac,.flac,.ogg,.wma" 
                     multiple
                     className="hidden" 
                     onChange={(e) => {
@@ -701,11 +710,25 @@ export default function Home() {
                   className="bg-foreground hover:opacity-90 text-background font-label-md text-label-md px-4 sm:px-6 py-2 rounded-xl transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <Sparkles size={18} />}
-                  <span className="hidden sm:inline">Generate Guide</span>
-                  <span className="sm:hidden">생성</span>
+                  <span className="hidden sm:inline">
+                    {files.some(f => /\.(mp3|wav|m4a|aac|flac|ogg|wma)$/i.test(f.name)) ? "Generate Minutes" : "Generate Guide"}
+                  </span>
+                  <span className="sm:hidden">
+                    {files.some(f => /\.(mp3|wav|m4a|aac|flac|ogg|wma)$/i.test(f.name)) ? "회의록" : "생성"}
+                  </span>
                 </button>
               </div>
             </div>
+
+            {/* 오디오 파일 감지 시 회의록 생성 모드 안내 */}
+            {files.some(f => /\.(mp3|wav|m4a|aac|flac|ogg|wma)$/i.test(f.name)) && (
+              <div className="px-4 py-2 mx-2 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-500 flex items-center justify-between">
+                <span className="flex items-center gap-1.5 font-medium">
+                  🎙️ <strong>음성 녹음 파일 감지됨:</strong> 학습 가이드 대신 <strong>전문 회의록(Executive Summary, 결정 사항, 액션 아이템, 원문 전사본)</strong>이 자동 생성됩니다.
+                </span>
+                <span className="text-[10px] font-mono opacity-80 uppercase">Audio Meeting Mode</span>
+              </div>
+            )}
 
             {/* Advanced Settings */}
             <div className="flex flex-wrap items-center justify-between gap-4 px-4 pb-2 border-t border-border-subtle pt-3 text-muted-foreground w-full">
