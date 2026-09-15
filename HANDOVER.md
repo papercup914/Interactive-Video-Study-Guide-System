@@ -1,6 +1,6 @@
 # Interactive Video Study Guide System - 인수인계서 (Handover)
 
-> **최종 갱신 일시**: 2026-09-14 (15:15 KST)  
+> **최종 갱신 일시**: 2026-09-14 (03:38 KST)  
 > **작성자**: Antigravity (AI Pair Programming Assistant)  
 > **문서 목적**: 다음 세션 작업자 및 사용자를 위한 프로젝트 현황, 아키텍처, 최근 해결된 버그 히스토리 및 운영 배포 인수인계
 
@@ -157,52 +157,6 @@ Interactive Video Study Guide System은 유튜브 영상 또는 웹 문서를 �
   * 백엔드 단위 테스트 `tests/test_pipeline_config.py` (6개 테스트 100% 통과, Exit code 0).
   * 기존 관리자 테스트 `tests/test_admin_c_plan.py` 회귀 테스트 통과 (Exit code 0).
   * Next.js 프로덕션 빌드 (`npm run build`) 무결점 성공 (Exit code 0).
-
-### 2.10 [음성 파일 지원 & 회의록 생성 파이프라인] 사운드 파일(MP3/WAV/M4A 등) 업로드 및 전문 비즈니스 회의록 생성 메커니즘 구축
-* **배경 및 목적**:
-  * 기존 유튜브 영상/웹 문서 중심의 파이프라인에서 확장하여, 사용자가 직접 녹음한 음성 파일(회의, 통화, 인터뷰, 세미나 등)을 업로드하고 텍스트로 변환 및 요약할 수 있는 기능을 요청받음.
-  * 사운드 파일의 경우 챕터 퀴즈나 파인만 기법 위주의 학습 가이드가 부적합하므로, 핵심 결정 사항(Key Decisions)과 액션 아이템(Action Items Table & Checklist), 원문 전사본을 포함하는 **전문 비즈니스 회의록(Meeting Minutes)** 생성 메커니즘을 신설.
-* **구현 내용**:
-  1. **전문 회의록 시스템 프롬프트 (`backend/prompts/meeting_minutes.py`)**:
-     * 100% 한국어 비즈니스 어조, 인사말/서두/결미 멘트 100% 배제.
-     * 5단계 구조화 출력 규격 강제:
-       - `## 1. 회의 개요 및 핵심 요약 (Executive Summary)`: 일시, 안건/주제, 3줄 핵심 요약.
-       - `## 2. 주요 논의 내용 (Key Discussions)`: 안건별 핵심 논의 및 쟁점 사항.
-       - `## 3. 핵심 결정 사항 (Key Decisions)`: 합의된 사항 및 보류/기각 사항.
-       - `## 4. 실행 과제 및 액션 아이템 (Action Items)`: 담당자, 기한, 마크다운 체크리스트 및 요약 테이블.
-       - `## 5. 주요 위험 요소 및 이슈 (Risks & Open Questions)`: 잠재적 리스크 및 후속 확인 필요 항목.
-  2. **회의록 LLM 생성 및 파싱 서비스 (`backend/services/llm/meeting_minutes.py`)**:
-     * `generate_meeting_minutes_content`: LLM 호출 후 마크다운 섹션을 파싱하여 가이드 뷰어 호환 문서(`document`) 딕셔너리로 변환.
-     * 원문 전사 전문(`Full Transcript`)을 마지막 섹션에 첨부하여 회의 참가자 발언 원문 대조 지원.
-  3. **비동기 태스크 파이프라인 오디오 분기 (`backend/services/tasks.py`)**:
-     * `AUDIO_EXTENSIONS` (`.mp3`, `.wav`, `.m4a`, `.aac`, `.flac`, `.ogg`, `.wma`) 감지 로직 추가.
-     * 오디오 파일인 경우 `process_audio`로 Whisper STT(Gemini STT 폴백) 수행 후, `generate_meeting_minutes_content`를 거쳐 즉시 완료 처리(`save_study_guide(length_preset="전문 회의록", analogy_preset="비즈니스 액션 플랜", ...)`).
-  4. **프론트엔드 업로드 UI 및 회의록 모드 감지 (`frontend/src/app/page.tsx`)**:
-     * 파일 입력 `accept` 속성에 `.mp3,.wav,.m4a,.aac,.flac,.ogg,.wma` 확장자 추가.
-     * 오디오 파일 감지 시 `🎙️ {filename}` 노란색 배지 렌더링 및 "회의 녹음 파일이 감지되었습니다. 전문 회의록 및 액션 아이템 모드로 생성됩니다" 안내 배너 출력.
-     * 생성 버튼 텍스트가 "회의록 생성 시작"으로 자동 전환.
-* **검증 결과**:
-  * 백엔드 단위 테스트 `tests/test_meeting_minutes.py` (프롬프트 구성, 마크다운 파싱, 오디오 확장자 감지 3개 테스트 100% 통과).
-  * 프론트엔드 프로덕션 빌드 (`npm run build`) 무결점 성공 (Exit code 0).
-  * AWS EC2(`13.209.73.143`) 백엔드 Docker 컨테이너 무중단 재빌드 및 배포 완료 (`FastAPI 200 OK`, `Celery Ready`).
-
-### 2.11 [P0 버그 픽스] 대용량 오디오 업로드 413 Payload Too Large 해결 (청크 분할 업로드 시스템 구축)
-* **문제 증상**:
-  * 메인 화면에서 대용량 음성 녹음 파일(MP3 등)을 첨부하고 생성을 요청했을 때 `생성 요청 실패: 서버 응답 오류 (상태 코드: 413)` 팝업 발생.
-* **원인 규명**:
-  * Next.js 프론트엔드가 호스팅된 Vercel Production의 Serverless/Rewrites 프록시에는 **단일 HTTP 요청 바디 4.5 MB 제한(Hard Limit)**이 존재함.
-  * 브라우저가 수십 MB 오디오 파일을 `/api/guide/start`로 직접 전송하면서 백엔드(FastAPI) 도달 전 Vercel 엣지 인프라에서 `413 FUNCTION_PAYLOAD_TOO_LARGE`로 요청을 즉시 차단함.
-* **해결 조치**:
-  1. **백엔드 청크 수신 및 결합 엔드포인트 신설 (`backend/routers/guide.py`)**:
-     * `POST /api/guide/upload-chunk`: 3MB 단위로 분할된 조각 바이너리를 `backend/tmp/chunks/{upload_id}/`에 저장하고, 마지막 청크 수신 시 단일 파일로 결합하여 `file_path` 반환.
-     * `POST /api/guide/start`: `uploaded_file_paths` 수신 지원. 이미 결합된 파일 경로를 Celery 작업 큐로 즉시 전달하여 메인 요청 바디를 수백 바이트(JSON)로 경량화.
-  2. **프론트엔드 브라우저 청크 분할 전송 모듈 (`frontend/src/app/page.tsx`)**:
-     * `uploadFileInChunks`: `Blob.slice()`를 이용하여 3MB 조각 단위로 순차 전송.
-     * 실시간 업로드 진행률(0% ~ 100%) 및 청크 조각 번호 표시 프로그레스 바 UI 렌더링.
-* **검증 결과**:
-  * 청크 업로드 및 무결점 결합 단위 테스트 `tests/test_chunked_upload.py` 통과 (`Ran 1 test in 0.173s, OK`).
-  * 프론트엔드 빌드(`npm run build`) 무결점 성공 (Exit code 0).
-  * AWS EC2(`13.209.73.143`) 백엔드 Docker 재빌드 및 무중단 배포 완료 (`FastAPI 200 OK`).
 
 ---
 

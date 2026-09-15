@@ -111,114 +111,36 @@ async def async_generate_guide(job_id: str, request_data: dict, file_paths: list
         video_chapters = None
         video_duration = 0
         
-        AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".wma"}
-        is_audio = False
-
         if file_paths and len(file_paths) > 0:
+            is_document = True
             combined_transcript = ""
             raw_title = ""
             
-            # 오디오 파일 포함 여부 검사
-            for path in file_paths:
-                ext = os.path.splitext(path)[1].lower()
-                if ext in AUDIO_EXTENSIONS:
-                    is_audio = True
-                    break
+            for i, path in enumerate(file_paths):
+                current_title = os.path.basename(path)
+                if current_title.startswith(f"{job_id}_"):
+                    current_title = current_title[len(f"{job_id}_"):]
+                
+                update_job_status(job_id, "transcribing", f"[{i+1}/{len(file_paths)}] {current_title} 텍스트 추출 중...")
+                
+                if pdf_parsing_method == "option_c":
+                    provider = "Google Gemini"
+                    from backend.services.source import upload_pdf_to_gemini
+                    text = await loop.run_in_executor(None, upload_pdf_to_gemini, path)
+                elif pdf_parsing_method == "option_b":
+                    from backend.services.source import extract_text_with_pymupdf4llm
+                    text = await loop.run_in_executor(None, extract_text_with_pymupdf4llm, path)
+                else:
+                    text = await loop.run_in_executor(None, extract_text_from_pdf, path)
+                
+                combined_transcript += f"\n\n# Document {i+1}: {current_title}\n\n" + text
+                if i == 0:
+                    raw_title = current_title
             
-            if is_audio:
-                for i, path in enumerate(file_paths):
-                    current_title = os.path.basename(path)
-                    if current_title.startswith(f"{job_id}_"):
-                        current_title = current_title[len(f"{job_id}_"):]
-                    ext = os.path.splitext(path)[1].lower()
-                    
-                    if ext in AUDIO_EXTENSIONS:
-                        update_job_status(job_id, "transcribing", f"[{i+1}/{len(file_paths)}] {current_title} 음성 전사(Whisper/Gemini) 중...")
-                        from backend.services.llm import process_audio
-                        text = await loop.run_in_executor(None, process_audio, path, provider)
-                    else:
-                        update_job_status(job_id, "transcribing", f"[{i+1}/{len(file_paths)}] {current_title} 텍스트 추출 중...")
-                        if pdf_parsing_method == "option_c":
-                            from backend.services.source import upload_pdf_to_gemini
-                            text = await loop.run_in_executor(None, upload_pdf_to_gemini, path)
-                        elif pdf_parsing_method == "option_b":
-                            from backend.services.source import extract_text_with_pymupdf4llm
-                            text = await loop.run_in_executor(None, extract_text_with_pymupdf4llm, path)
-                        else:
-                            from backend.services.source import extract_text_from_pdf
-                            text = await loop.run_in_executor(None, extract_text_from_pdf, path)
-                    
-                    combined_transcript += f"\n\n# Source {i+1}: {current_title}\n\n" + text
-                    if i == 0:
-                        raw_title = current_title
-                
-                transcript = combined_transcript
-                url_hash = job_id
-                if len(file_paths) > 1:
-                    raw_title = f"{raw_title} 외 {len(file_paths)-1}건"
-                
-                # 전문 회의록 생성 분기 실행
-                update_job_status(job_id, "generating_meeting_minutes", "음성 대본 기반 전문 회의록(Meeting Minutes) 및 액션 아이템 생성 중...")
-                from backend.services.llm import generate_meeting_minutes_content
-                document = await loop.run_in_executor(
-                    None,
-                    generate_meeting_minutes_content,
-                    transcript,
-                    provider,
-                    raw_title,
-                    custom_api_key,
-                    custom_base_url
-                )
-                
-                total_sections = len(document)
-                sections = list(document.keys())
-                finish_job(job_id, document, total_sections=total_sections)
-                
-                elapsed_sec = int(time.time() - start_time)
-                save_study_guide(
-                    job_id=job_id,
-                    url=url or f"audio://{raw_title}",
-                    title=f"[회의록] {raw_title}",
-                    image_url=None,
-                    provider=provider,
-                    document=document,
-                    profile_message="🎙️ 음성 녹음 기반 전문 회의록 및 액션 아이템이 도출되었습니다.",
-                    generation_time_sec=elapsed_sec,
-                    user_id=request_data.get("user_id"),
-                    length_preset="전문 회의록",
-                    analogy_preset="비즈니스 액션 플랜",
-                    video_duration="음성 파일",
-                    notes=sections
-                )
-                print(f"[Tasks] Meeting minutes successfully generated for job_id={job_id} in {elapsed_sec}s")
-                return
-            else:
-                is_document = True
-                for i, path in enumerate(file_paths):
-                    current_title = os.path.basename(path)
-                    if current_title.startswith(f"{job_id}_"):
-                        current_title = current_title[len(f"{job_id}_"):]
-                    
-                    update_job_status(job_id, "transcribing", f"[{i+1}/{len(file_paths)}] {current_title} 텍스트 추출 중...")
-                    
-                    if pdf_parsing_method == "option_c":
-                        provider = "Google Gemini"
-                        from backend.services.source import upload_pdf_to_gemini
-                        text = await loop.run_in_executor(None, upload_pdf_to_gemini, path)
-                    elif pdf_parsing_method == "option_b":
-                        from backend.services.source import extract_text_with_pymupdf4llm
-                        text = await loop.run_in_executor(None, extract_text_with_pymupdf4llm, path)
-                    else:
-                        text = await loop.run_in_executor(None, extract_text_from_pdf, path)
-                    
-                    combined_transcript += f"\n\n# Document {i+1}: {current_title}\n\n" + text
-                    if i == 0:
-                        raw_title = current_title
-                
-                transcript = combined_transcript
-                url_hash = job_id
-                if len(file_paths) > 1:
-                    raw_title = f"{raw_title} 외 {len(file_paths)-1}건"
+            transcript = combined_transcript
+            url_hash = job_id
+            if len(file_paths) > 1:
+                raw_title = f"{raw_title} 외 {len(file_paths)-1}건"
         elif "youtube.com" in url or "youtu.be" in url:
             from backend.services.video import extract_video_id
             vid = extract_video_id(url)

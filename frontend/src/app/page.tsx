@@ -422,59 +422,6 @@ export default function Home() {
   const [deleteTargetGroup, setDeleteTargetGroup] = useState<GroupedGuide | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
-  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
-  const [uploadStatusText, setUploadStatusText] = useState<string>("");
-
-  // 대용량 파일 청크 분할 업로드 (Vercel 4.5MB 페이로드 제한 우회)
-  const uploadFileInChunks = async (
-    file: File,
-    onProgress?: (percent: number, current: number, total: number) => void
-  ): Promise<string> => {
-    const CHUNK_SIZE = 3 * 1024 * 1024; // 3MB 단위
-    const totalChunks = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
-    const uploadId = `upload_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-
-    let finalFilePath = "";
-
-    for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-      const start = chunkIndex * CHUNK_SIZE;
-      const end = Math.min(start + CHUNK_SIZE, file.size);
-      const chunkBlob = file.slice(start, end);
-
-      const chunkFormData = new FormData();
-      chunkFormData.append("upload_id", uploadId);
-      chunkFormData.append("chunk_index", String(chunkIndex));
-      chunkFormData.append("total_chunks", String(totalChunks));
-      chunkFormData.append("filename", file.name);
-      chunkFormData.append("chunk", chunkBlob, file.name);
-
-      const res = await fetch("/api/guide/upload-chunk", {
-        method: "POST",
-        body: chunkFormData,
-      });
-
-      if (!res.ok) {
-        const errText = await res.text().catch(() => "");
-        throw new Error(`청크 업로드 실패 (${chunkIndex + 1}/${totalChunks}): ${res.status} ${errText}`);
-      }
-
-      const data = await res.json();
-      if (data.file_path) {
-        finalFilePath = data.file_path;
-      }
-
-      if (onProgress) {
-        const percent = Math.round(((chunkIndex + 1) / totalChunks) * 100);
-        onProgress(percent, chunkIndex + 1, totalChunks);
-      }
-    }
-
-    if (!finalFilePath) {
-      throw new Error("파일 결합에 실패하였습니다. 다시 시도해 주세요.");
-    }
-
-    return finalFilePath;
-  };
 
   const fetchQuota = async () => {
     try {
@@ -570,24 +517,9 @@ export default function Home() {
       if (customApiKey) formData.append("custom_api_key", customApiKey);
       if (customBaseUrl) formData.append("custom_base_url", customBaseUrl);
       
-      // 파일이 있는 경우 3MB 청크 단위로 분할 업로드하여 Vercel 4.5MB 페이로드 제한 우회
       if (files.length > 0) {
-        const uploadedFilePaths: string[] = [];
-        for (let i = 0; i < files.length; i++) {
-          const f = files[i];
-          setUploadProgress(0);
-          setUploadStatusText(`파일 업로드 중 (${i + 1}/${files.length}): ${f.name} (0%)`);
-          
-          const filePath = await uploadFileInChunks(f, (percent, cur, tot) => {
-            setUploadProgress(percent);
-            setUploadStatusText(`파일 업로드 중 (${i + 1}/${files.length}): ${percent}% (조각 ${cur}/${tot})`);
-          });
-          uploadedFilePaths.push(filePath);
-        }
-        formData.append("uploaded_file_paths", JSON.stringify(uploadedFilePaths));
+        files.forEach(f => formData.append("files", f));
       }
-
-      setUploadStatusText("가이드 생성 요청 전달 중...");
 
       const supabase = createClient();
       const { data: sessionData } = await supabase.auth.getSession();
@@ -628,11 +560,6 @@ export default function Home() {
           return;
         }
 
-        if (res.status === 413) {
-          alert("업로드 파일 용량이 너무 큽니다. 청크 분할 전송 모드로 재시도해 주세요.");
-          return;
-        }
-
         alert(`생성 요청 실패: ${errorDetail}`);
         return;
       }
@@ -649,8 +576,6 @@ export default function Home() {
       alert(`서버 연결 오류가 발생했습니다: ${err?.message || "네트워크 상태를 확인해주세요."}`);
     } finally {
       setIsSubmitting(false);
-      setUploadProgress(null);
-      setUploadStatusText("");
     }
   };
 
@@ -731,23 +656,14 @@ export default function Home() {
               
               {files.length > 0 ? (
                 <div className="flex-1 bg-transparent px-2 font-body-lg text-body-lg text-primary flex items-center gap-2 overflow-x-auto scrollbar-hide">
-                  {files.map((f, idx) => {
-                    const isAudio = /\.(mp3|wav|m4a|aac|flac|ogg|wma)$/i.test(f.name);
-                    return (
-                      <div key={idx} className={`flex items-center px-2 py-1 rounded-md shrink-0 border ${
-                        isAudio 
-                          ? "bg-amber-500/10 text-amber-500 border-amber-500/30 font-medium" 
-                          : "bg-primary-container/10 text-primary border-primary-container/20"
-                      }`}>
-                        <span className="truncate max-w-[150px] text-sm">
-                          {isAudio ? `🎙️ ${f.name}` : f.name}
-                        </span>
-                        <button type="button" onClick={() => setFiles(files.filter((_, i) => i !== idx))} className="ml-1 text-muted-foreground hover:text-error transition-colors">
-                          <X size={14} />
-                        </button>
-                      </div>
-                    );
-                  })}
+                  {files.map((f, idx) => (
+                    <div key={idx} className="flex items-center bg-primary-container/10 px-2 py-1 rounded-md shrink-0 border border-primary-container/20">
+                      <span className="truncate max-w-[150px] text-sm">{f.name}</span>
+                      <button type="button" onClick={() => setFiles(files.filter((_, i) => i !== idx))} className="ml-1 text-muted-foreground hover:text-error transition-colors">
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ))}
                   <button type="button" onClick={() => setFiles([])} className="text-muted-foreground hover:text-error transition-colors ml-auto shrink-0" title="모두 지우기">
                     <X size={18} />
                   </button>
@@ -757,18 +673,18 @@ export default function Home() {
                   type="text"
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
-                  placeholder="유튜브 링크를 붙여넣거나 문서/음성(MP3, WAV) 파일을 업로드하세요..." 
+                  placeholder="유튜브 링크를 붙여넣거나 문서를 업로드하세요..." 
                   className="flex-1 bg-transparent border-none focus:ring-0 font-body-lg text-body-lg text-text-primary placeholder-muted-foreground outline-none w-full"
                   required={files.length === 0}
                 />
               )}
 
               <div className="flex gap-2 shrink-0">
-                <label className="p-2 text-muted-foreground hover:text-text-primary hover:bg-surface-container-lowest rounded-lg transition-colors border border-transparent hover:border-border-subtle flex items-center justify-center cursor-pointer" title="파일 업로드 (PDF, TXT, MD, MP3, WAV, M4A)">
+                <label className="p-2 text-muted-foreground hover:text-text-primary hover:bg-surface-container-lowest rounded-lg transition-colors border border-transparent hover:border-border-subtle flex items-center justify-center cursor-pointer">
                   <Paperclip size={20} />
                   <input 
                     type="file" 
-                    accept=".pdf,.txt,.md,.mp3,.wav,.m4a,.aac,.flac,.ogg,.wma" 
+                    accept=".pdf,.txt,.md" 
                     multiple
                     className="hidden" 
                     onChange={(e) => {
@@ -785,44 +701,11 @@ export default function Home() {
                   className="bg-foreground hover:opacity-90 text-background font-label-md text-label-md px-4 sm:px-6 py-2 rounded-xl transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <Sparkles size={18} />}
-                  <span className="hidden sm:inline">
-                    {uploadStatusText ? uploadStatusText : (files.some(f => /\.(mp3|wav|m4a|aac|flac|ogg|wma)$/i.test(f.name)) ? "Generate Minutes" : "Generate Guide")}
-                  </span>
-                  <span className="sm:hidden">
-                    {uploadProgress !== null ? `${uploadProgress}%` : (files.some(f => /\.(mp3|wav|m4a|aac|flac|ogg|wma)$/i.test(f.name)) ? "회의록" : "생성")}
-                  </span>
+                  <span className="hidden sm:inline">Generate Guide</span>
+                  <span className="sm:hidden">생성</span>
                 </button>
               </div>
             </div>
-
-            {/* 대용량 파일 청크 분할 업로드 진행 바 */}
-            {uploadProgress !== null && (
-              <div className="px-4 py-2 mx-2 bg-primary/10 border border-primary/20 rounded-xl flex flex-col gap-1.5">
-                <div className="flex justify-between items-center text-xs font-semibold text-primary">
-                  <span className="flex items-center gap-1.5">
-                    <Loader2 size={13} className="animate-spin" />
-                    {uploadStatusText || "대용량 파일 청크 분할 전송 중 (Vercel 4.5MB 제한 우회)..."}
-                  </span>
-                  <span className="font-mono">{uploadProgress}%</span>
-                </div>
-                <div className="w-full bg-surface-container-high rounded-full h-1.5 overflow-hidden">
-                  <div 
-                    className="bg-primary h-full transition-all duration-300 rounded-full"
-                    style={{ width: `${uploadProgress}%` }}
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* 오디오 파일 감지 시 회의록 생성 모드 안내 */}
-            {files.some(f => /\.(mp3|wav|m4a|aac|flac|ogg|wma)$/i.test(f.name)) && (
-              <div className="px-4 py-2 mx-2 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-500 flex items-center justify-between">
-                <span className="flex items-center gap-1.5 font-medium">
-                  🎙️ <strong>음성 녹음 파일 감지됨:</strong> 학습 가이드 대신 <strong>전문 회의록(Executive Summary, 결정 사항, 액션 아이템, 원문 전사본)</strong>이 자동 생성됩니다.
-                </span>
-                <span className="text-[10px] font-mono opacity-80 uppercase">Audio Meeting Mode</span>
-              </div>
-            )}
 
             {/* Advanced Settings */}
             <div className="flex flex-wrap items-center justify-between gap-4 px-4 pb-2 border-t border-border-subtle pt-3 text-muted-foreground w-full">
