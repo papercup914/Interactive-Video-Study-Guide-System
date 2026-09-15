@@ -1,6 +1,6 @@
 # Interactive Video Study Guide System - 인수인계서 (Handover)
 
-> **최종 갱신 일시**: 2026-09-14 (03:38 KST)  
+> **최종 갱신 일시**: 2026-09-15 (09:25 KST)  
 > **작성자**: Antigravity (AI Pair Programming Assistant)  
 > **문서 목적**: 다음 세션 작업자 및 사용자를 위한 프로젝트 현황, 아키텍처, 최근 해결된 버그 히스토리 및 운영 배포 인수인계
 
@@ -186,8 +186,9 @@ Interactive Video Study Guide System은 유튜브 영상 또는 웹 문서를 �
 * **Vercel Production 배포 완료**: `main` 브랜치 자동 배포
 
 ### 4.2 Git 배포 내역
-* **최신 커밋**: `0b0efa6` (`docs(handover): update HANDOVER.md with admin dashboard and EC2 backend hotfix`)
-* **관리자 및 핫픽스 관련 커밋**:
+* **최신 커밋**: `ef96e9b` (`revert: rollback audio/mp3 file upload and meeting minutes pipeline completely`)
+* **관리자 및 생성 매커니즘 제어 포털 커밋**:
+  * `8abd3b7`: `feat(admin): add generation pipeline mechanism control portal (/admin/generation-config)`
   * `1f2b307`: `fix(admin): add missing imports in admin router`
   * `125f0c2`: `fix(middleware): bypass manifest.json and static metadata to prevent PWA syntax error`
   * `f62eb46`: `fix(admin): track admin layout and main dashboard page on vercel`
